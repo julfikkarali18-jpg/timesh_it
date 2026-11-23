@@ -70,7 +70,6 @@ PASSWORD_HASH_ITERATIONS = 310_000
 
 
 def hash_password(password: str, salt: str = None) -> str:
-    """Create a salted PBKDF2-SHA256 password hash."""
     salt_bytes = os.urandom(16) if salt is None else str(salt).encode("utf-8")
     derived = hashlib.pbkdf2_hmac(
         "sha256", str(password).encode("utf-8"), salt_bytes, PASSWORD_HASH_ITERATIONS
@@ -81,7 +80,6 @@ def hash_password(password: str, salt: str = None) -> str:
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
-    """Verify modern PBKDF2 hashes and legacy TIMESH SHA-256 hashes."""
     stored = str(stored_hash or "").strip()
     if stored.startswith("pbkdf2_sha256$"):
         try:
@@ -123,7 +121,6 @@ NAV_ITEMS = [
     {"key": "Roster", "icon": "📋", "title": "Roster"},
     {"key": "Leave", "icon": "🗓️", "title": "Leave"},
     {"key": "Do Not Punch", "icon": "🚫", "title": "Do Not Punch"},
-    {"key": "Other Sheet Tabs", "icon": "📑", "title": "Other Tabs"},
     {"key": "Users", "icon": "🔐", "title": "Users & Logs"},
 ]
 
@@ -145,6 +142,21 @@ html, body, [class*="css"] {
                 radial-gradient(circle at top left, rgba(56, 189, 248, 0.07), transparent 32%),
                 #0b1120;
     color: #f1f5f9;
+}
+
+/* Remove top spacing gap on main canvas and sidebar */
+header[data-testid="stHeader"] {
+    background: transparent !important;
+    height: 2.2rem !important;
+}
+
+div[data-testid="stAppViewBlockContainer"],
+.block-container {
+    padding-top: 0.65rem !important;
+}
+
+section[data-testid="stSidebar"] > div:first-child {
+    padding-top: 0.45rem !important;
 }
 
 .login-minimal-brand {
@@ -170,10 +182,6 @@ html, body, [class*="css"] {
 section[data-testid="stSidebar"] {
     background: linear-gradient(180deg, #0f172a 0%, #0b1120 100%);
     border-right: 1px solid rgba(148, 163, 184, 0.14);
-}
-
-section[data-testid="stSidebar"] > div:first-child {
-    padding-top: 1.2rem;
 }
 
 .sidebar-brand {
@@ -250,7 +258,7 @@ div[data-testid="stSidebar"] div.stButton > button[kind="primary"] {
     display: flex;
     justify-content: space-between;
     gap: 8px;
-    margin-bottom: 5px;
+    margin-bottom: 6px;
 }
 
 .sidebar-info-row:last-child {
@@ -288,6 +296,60 @@ div[data-testid="stSidebar"] div.stButton > button[kind="primary"] {
     font-size: 13px;
     color: #94a3b8;
     margin-top: 6px;
+}
+
+.today-highlight-card {
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(168, 85, 247, 0.16));
+    border: 1px solid rgba(56, 189, 248, 0.55);
+    border-left: 4px solid #38bdf8;
+    border-radius: 12px;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    box-shadow: 0 6px 18px -8px rgba(56, 189, 248, 0.35);
+}
+
+.today-highlight-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    color: #7dd3fc;
+}
+
+.today-highlight-date {
+    font-size: 18px;
+    font-weight: 800;
+    color: #f0f9ff;
+    letter-spacing: 0.3px;
+}
+
+.upcoming-row-red {
+    background: linear-gradient(90deg, rgba(220, 38, 38, 0.24), rgba(153, 27, 27, 0.14)) !important;
+    border: 1px solid rgba(248, 113, 113, 0.55) !important;
+    border-left: 4px solid #ef4444 !important;
+    border-radius: 10px;
+    padding: 9px 12px;
+    margin-bottom: 6px;
+}
+
+.upcoming-row-red, .upcoming-row-red div, .upcoming-row-red span {
+    color: #fecaca !important;
+}
+
+.upcoming-row-green {
+    background: linear-gradient(90deg, rgba(22, 163, 74, 0.26), rgba(21, 128, 61, 0.16)) !important;
+    border: 1px solid rgba(74, 222, 128, 0.65) !important;
+    border-left: 4px solid #22c55e !important;
+    border-radius: 10px;
+    padding: 9px 12px;
+    margin-bottom: 6px;
+}
+
+.upcoming-row-green, .upcoming-row-green div, .upcoming-row-green span {
+    color: #bbf7d0 !important;
 }
 
 div[data-testid="stMetric"] {
@@ -438,6 +500,17 @@ div[class*="st-key-roster_not_found_"] button:hover {
     border: 1px solid rgba(56, 189, 248, 0.3);
 }
 
+.date-pill {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    background: rgba(56, 189, 248, 0.14);
+    color: #7dd3fc;
+    border: 1px solid rgba(56, 189, 248, 0.30);
+}
+
 .found-pill {
     display: inline-block;
     padding: 2px 10px;
@@ -507,11 +580,12 @@ def inject_auto_refresh(interval_seconds: int = AUTO_REFRESH_SECONDS, enabled: b
     )
 
 
-def render_banner(title, subtitle):
+def render_banner(title, subtitle=""):
+    meta_html = f"<div class='page-banner-meta'>{subtitle}</div>" if subtitle else ""
     st.markdown(
         f"<div class='page-banner'>"
         f"<div class='page-banner-title'>{html.escape(title)}</div>"
-        f"<div class='page-banner-meta'>{subtitle}</div>"
+        f"{meta_html}"
         f"</div>",
         unsafe_allow_html=True,
     )
@@ -519,7 +593,6 @@ def render_banner(title, subtitle):
 
 @st.cache_resource
 def get_gspread_client():
-    # 1) Cloud: Use TOKEN_JSON + CREDENTIALS_JSON from st.secrets
     if "TOKEN_JSON" in st.secrets:
         raw_token = st.secrets["TOKEN_JSON"]
         token_info = json.loads(raw_token) if isinstance(raw_token, str) else dict(raw_token)
@@ -537,13 +610,11 @@ def get_gspread_client():
             creds.refresh(Request())
         return gspread.authorize(creds)
 
-    # 2) Cloud fallback: Service Account if configured
     if "gcp_service_account" in st.secrets:
         sa_info = dict(st.secrets["gcp_service_account"])
         creds = ServiceAccountCredentials.from_service_account_info(sa_info, scopes=SCOPES)
         return gspread.authorize(creds)
 
-    # 3) Local fallback: token.json & credentials.json
     creds = None
     if os.path.exists(TOKEN_FILE):
         creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
@@ -790,6 +861,39 @@ def get_dnp_recent_sort_key(row):
     return (has_date, primary_dt.toordinal() if primary_dt else -1, secondary_dt.toordinal() if secondary_dt else -1, row.get("_sheet_row", 0))
 
 
+def count_upcoming_leaves(leave_rows, today_date: date) -> int:
+    if not leave_rows:
+        return 0
+    count = 0
+    for r in leave_rows:
+        upto_dt = parse_sheet_date(r.get("Upto", ""))
+        if upto_dt is not None and upto_dt >= today_date:
+            count += 1
+    return count
+
+
+def count_active_dnp(dnp_rows, today_date: date) -> int:
+    if not dnp_rows:
+        return 0
+    active_count = 0
+    for r in dnp_rows:
+        upto_dt = parse_sheet_date(
+            resolve_field_value(r, "Do Not Punch Upto") or r.get("Do Not Punch Upto", "")
+        )
+        from_dt = parse_sheet_date(
+            resolve_field_value(r, "Do Not Punch From") or r.get("Do Not Punch From", "")
+        )
+        if upto_dt is not None:
+            if upto_dt >= today_date:
+                active_count += 1
+        elif from_dt is not None:
+            if from_dt >= today_date:
+                active_count += 1
+        else:
+            active_count += 1
+    return active_count
+
+
 def get_next_sl_number(rows, sl_column="SL"):
     max_num = 0
     for r in rows:
@@ -878,11 +982,21 @@ def resolve_field_value(row_dict, target_header):
     return ""
 
 
+def get_roster_row_date_str(row_dict: dict) -> str:
+    val = (
+        resolve_field_value(row_dict, "Date")
+        or resolve_field_value(row_dict, "Roster_Date")
+        or resolve_field_value(row_dict, "Attendance_Date")
+    )
+    return val.strip()
+
+
 def get_roster_found_status(row_dict: dict) -> str:
     val = (
         resolve_field_value(row_dict, ROSTER_STATUS_COLUMN)
         or resolve_field_value(row_dict, "Found / Not Found")
         or resolve_field_value(row_dict, "Roster_Status")
+        or resolve_field_value(row_dict, "Status")
     )
     low = val.strip().lower()
     if low in {"found", "yes", "present", "ok", "true"}:
@@ -898,6 +1012,12 @@ def get_roster_target_col(sheet_name, tab_name):
     ws = sh.worksheet(tab_name)
     first_row = ws.row_values(1)
     headers = [str(h).strip() for h in first_row]
+
+    for idx, h in enumerate(headers, start=1):
+        norm_h = re.sub(r"[^a-z0-9]", "", h.lower())
+        if norm_h in {"foundstatus", "foundnotfound", "rosterstatus"}:
+            return idx, h
+
     date_cols = []
     for idx, h in enumerate(headers, start=1):
         dt = parse_sheet_date(h)
@@ -908,45 +1028,21 @@ def get_roster_target_col(sheet_name, tab_name):
         return date_cols[-1][1], headers[date_cols[-1][1] - 1]
 
     for idx, h in enumerate(headers, start=1):
-        norm_h = re.sub(r"[^a-z0-9]", "", h.lower())
-        if norm_h in {"foundstatus", "foundnotfound", "rosterstatus", "status"}:
-            return idx, h
+        if re.sub(r"[^a-z0-9]", "", h.lower()) == "date":
+            if idx < len(headers):
+                return idx + 1, headers[idx]
+            new_col_idx = len(headers) + 1
+            ws.update_cell(1, new_col_idx, ROSTER_STATUS_COLUMN)
+            return new_col_idx, ROSTER_STATUS_COLUMN
 
     fallback_idx = max(len(headers), 1)
     fallback_name = headers[fallback_idx - 1] if headers else ROSTER_STATUS_COLUMN
     return fallback_idx, fallback_name
 
 
-def get_roster_date_column_index(headers: list) -> int:
-    date_cols = []
-    for idx, h in enumerate(headers, start=1):
-        dt = parse_sheet_date(str(h).strip())
-        if dt is not None:
-            date_cols.append((dt, idx))
-    if date_cols:
-        date_cols.sort(key=lambda x: x[0])
-        return date_cols[-1][1]
-    for idx, h in enumerate(headers, start=1):
-        norm_h = re.sub(r"[^a-z0-9]", "", str(h).lower())
-        if norm_h in {"foundstatus", "foundnotfound", "rosterstatus", "status"}:
-            return idx
-    return max(len(headers), 1)
-
-
 def get_roster_line_status(row_dict: dict, headers: list) -> str:
     if "_override_status" in row_dict and row_dict["_override_status"]:
         return row_dict["_override_status"]
-    date_col_idx = get_roster_date_column_index(headers)
-    if 1 <= date_col_idx <= len(headers):
-        col_name = headers[date_col_idx - 1]
-        val = str(row_dict.get(col_name, "")).strip()
-        low = val.lower()
-        if low in {"found", "yes", "present", "ok", "true"}:
-            return "Found"
-        if low in {"not found", "notfound", "no", "absent", "false"}:
-            return "Not Found"
-        if val:
-            return val
     return get_roster_found_status(row_dict)
 
 
@@ -955,6 +1051,7 @@ def save_roster_found_status_instant(sheet_name, tab_name, sheet_row, status_val
     ws = sh.worksheet(tab_name)
     col_idx, col_name = get_roster_target_col(sheet_name, tab_name)
     ws.update_cell(int(sheet_row), int(col_idx), str(status_value).strip())
+    clear_sheet_cache()
     return col_name
 
 
@@ -969,17 +1066,17 @@ def roster_sl_sort_key(row_dict: dict):
 
 
 def compute_roster_present_bonus(roster_rows, roster_headers, emp_code: str, emp_name: str, as_of_date: date) -> int:
-    if not roster_rows or not roster_headers:
+    if not roster_rows:
         return 0
 
-    norm_code = str(emp_code or "").strip().lower()
+    norm_code = re.sub(r"\s+", "", str(emp_code or "").strip()).lower()
     norm_name = re.sub(r"\s+", " ", str(emp_name or "").strip()).lower()
-    cap_dt = min(as_of_date, YEAR_END_CAP)
+    cap_dt = max(min(as_of_date, YEAR_END_CAP), YEAR_END_CAP)
     bonus_dates = set()
     present_values = {"found", "yes", "present", "ok", "true", "1"}
 
     for rr in roster_rows:
-        r_code = resolve_field_value(rr, "EMP_Code").lower()
+        r_code = re.sub(r"\s+", "", resolve_field_value(rr, "EMP_Code")).lower()
         r_name = re.sub(
             r"\s+", " ",
             (resolve_field_value(rr, "EMP_Name") or resolve_field_value(rr, "Emp_Name")).lower(),
@@ -991,7 +1088,21 @@ def compute_roster_present_bonus(roster_rows, roster_headers, emp_code: str, emp
         if not matched:
             continue
 
-        for header in roster_headers:
+        row_dt = parse_sheet_date(get_roster_row_date_str(rr))
+        if row_dt and (PROJECTION_START <= row_dt <= cap_dt):
+            if row_dt.weekday() == 6 or row_dt in NATIONAL_HOLIDAYS_2026:
+                st_val = get_roster_found_status(rr).strip().lower()
+                if st_val in present_values:
+                    bonus_dates.add(row_dt)
+                else:
+                    for k, v in rr.items():
+                        if k == "_sheet_row":
+                            continue
+                        if str(v or "").strip().lower() in present_values:
+                            bonus_dates.add(row_dt)
+                            break
+
+        for header in (roster_headers or []):
             roster_date = parse_sheet_date(header)
             if not roster_date or not (PROJECTION_START <= roster_date <= cap_dt):
                 continue
@@ -1014,12 +1125,12 @@ def compute_faculty_working_and_present(
     if holidays is None:
         holidays = NATIONAL_HOLIDAYS_2026
 
-    norm_code = str(emp_code or "").strip().lower()
+    norm_code = re.sub(r"\s+", "", str(emp_code or "").strip()).lower()
     norm_name = re.sub(r"\s+", " ", str(emp_name or "").strip()).lower()
 
     matched_s8 = None
     for sr in sheet8_rows:
-        s_code = resolve_field_value(sr, "EMP_Code").lower()
+        s_code = re.sub(r"\s+", "", resolve_field_value(sr, "EMP_Code")).lower()
         s_name = re.sub(r"\s+", " ", (resolve_field_value(sr, "EMP_Name") or resolve_field_value(sr, "Emp_Name")).lower())
         if (norm_code and s_code and s_code == norm_code) or ((not norm_code or not s_code) and norm_name and s_name == norm_name):
             matched_s8 = sr
@@ -1041,7 +1152,7 @@ def compute_faculty_working_and_present(
 
     fac_leave_intervals = []
     for lr in leave_rows:
-        l_code = resolve_field_value(lr, "EMP_Code").lower()
+        l_code = re.sub(r"\s+", "", resolve_field_value(lr, "EMP_Code")).lower()
         l_name = re.sub(r"\s+", " ", (resolve_field_value(lr, "Emp_Name") or resolve_field_value(lr, "EMP_Name")).lower())
         if (norm_code and l_code and l_code == norm_code) or ((not norm_code or not l_code) and norm_name and l_name == norm_name):
             lf, lu = parse_sheet_date(resolve_field_value(lr, "From")), parse_sheet_date(resolve_field_value(lr, "Upto"))
@@ -1050,7 +1161,7 @@ def compute_faculty_working_and_present(
 
     fac_dnp_intervals = []
     for dr in dnp_rows:
-        d_code = resolve_field_value(dr, "EMP_Code").lower()
+        d_code = re.sub(r"\s+", "", resolve_field_value(dr, "EMP_Code")).lower()
         d_name = re.sub(r"\s+", " ", (resolve_field_value(dr, "EMP_Name") or resolve_field_value(dr, "Emp_Name")).lower())
         if (norm_code and d_code and d_code == norm_code) or ((not norm_code or not d_code) and norm_name and d_name == norm_name):
             df, du = parse_sheet_date(resolve_field_value(dr, "Do Not Punch From")), parse_sheet_date(resolve_field_value(dr, "Do Not Punch Upto"))
@@ -1376,7 +1487,6 @@ def build_leave_suggestions(leave_rows, today_date):
     return suggestions
 
 
-# ================= ENSURE SYSTEM SHEETS & LOAD USERS =================
 try:
     ensure_system_tabs(SPREADSHEET_NAME)
     sheet_users_db = load_users_from_sheet(SPREADSHEET_NAME)
@@ -1393,8 +1503,9 @@ if "auto_refresh_enabled" not in st.session_state:
     st.session_state["auto_refresh_enabled"] = False
 if "roster_status_overrides" not in st.session_state:
     st.session_state["roster_status_overrides"] = {}
+if "upcoming_leave_ok_map" not in st.session_state:
+    st.session_state["upcoming_leave_ok_map"] = {}
 
-# ================= MINIMAL LOGIN SCREEN =================
 if st.session_state["logged_in_user"] is None:
     inject_auto_refresh(AUTO_REFRESH_SECONDS, enabled=st.session_state["auto_refresh_enabled"])
     st.markdown(
@@ -1454,6 +1565,8 @@ if "active_nav_slice" not in st.session_state:
     st.session_state["active_nav_slice"] = qp_slice if qp_slice in valid_nav_keys else "Analytics Dashboard"
 elif qp_slice in valid_nav_keys and qp_slice != st.session_state.get("_last_qp_slice"):
     st.session_state["active_nav_slice"] = qp_slice
+elif st.session_state.get("active_nav_slice") not in valid_nav_keys:
+    st.session_state["active_nav_slice"] = "Analytics Dashboard"
 st.session_state["_last_qp_slice"] = qp_slice
 
 try:
@@ -1475,6 +1588,22 @@ dnp_tab = next((t for t in dnp_tab_candidates if t in all_tabs), None)
 
 attendance_base_tab = next((t for t in ATTENDANCE_BASE_TAB_CANDIDATES if t in all_tabs), None)
 
+today_now = date.today()
+try:
+    _, nav_leave_rows = load_worksheet_rows_with_index(SPREADSHEET_NAME, leave_tab) if leave_tab else ([], [])
+    upcoming_leave_count = count_upcoming_leaves(nav_leave_rows, today_now)
+except Exception:
+    nav_leave_rows = []
+    upcoming_leave_count = 0
+
+target_dnp_nav_tab = dnp_tab or "Don Not Punch"
+try:
+    _, nav_dnp_rows = load_worksheet_rows_with_index(SPREADSHEET_NAME, target_dnp_nav_tab) if target_dnp_nav_tab in all_tabs else ([], [])
+    active_dnp_count = count_active_dnp(nav_dnp_rows, today_now)
+except Exception:
+    nav_dnp_rows = []
+    active_dnp_count = 0
+
 pending_notices_list = []
 if is_admin_user and st.session_state.get("active_nav_slice") == "Users" and REQUESTS_TAB_NAME in all_tabs:
     try:
@@ -1483,7 +1612,6 @@ if is_admin_user and st.session_state.get("active_nav_slice") == "Users" and REQ
     except Exception:
         pending_notices_list = []
 
-# ================= SIDEBAR NAVIGATION =================
 with st.sidebar:
     st.markdown(
         "<div class='sidebar-brand'>"
@@ -1507,7 +1635,15 @@ with st.sidebar:
 
     for nav in NAV_ITEMS:
         is_curr = st.session_state["active_nav_slice"] == nav["key"]
-        nav_title = "Security" if (nav["key"] == "Users" and not is_admin_user) else nav["title"]
+        if nav["key"] == "Leave":
+            nav_title = f"Leave ({upcoming_leave_count})"
+        elif nav["key"] == "Do Not Punch":
+            nav_title = f"Do Not Punch ({active_dnp_count})"
+        elif nav["key"] == "Users" and not is_admin_user:
+            nav_title = "Security"
+        else:
+            nav_title = nav["title"]
+
         if st.button(
             f"{nav['icon']}  {nav_title}",
             key=f"nav_btn_{nav['key']}",
@@ -1522,11 +1658,6 @@ with st.sidebar:
         f"<div class='sidebar-info-box'>"
         f"<div class='sidebar-info-row'><span>User</span><span class='sidebar-info-val'>{html.escape(str(current_user.get('name', '-')))}</span></div>"
         f"<div class='sidebar-info-row'><span>Role</span><span class='sidebar-info-val'>{html.escape(str(current_user.get('role', '-')).upper())}</span></div>"
-        f"<div class='sidebar-info-row'><span>Sheet</span><span class='sidebar-info-val'>{html.escape(SPREADSHEET_NAME)}</span></div>"
-        f"<div class='sidebar-info-row'><span>Roster Tab</span><span class='sidebar-info-val'>{html.escape(str(roster_tab or 'Sheet2'))}</span></div>"
-        f"<div class='sidebar-info-row'><span>Leave Tab</span><span class='sidebar-info-val'>{html.escape(str(leave_tab or '-'))}</span></div>"
-        f"<div class='sidebar-info-row'><span>DNP Tab</span><span class='sidebar-info-val'>{html.escape(str(dnp_tab or 'Don Not Punch'))}</span></div>"
-        f"<div class='sidebar-info-row'><span>Auto Refresh</span><span class='sidebar-info-val'>Every {AUTO_REFRESH_SECONDS}s</span></div>"
         f"</div>",
         unsafe_allow_html=True,
     )
@@ -1630,110 +1761,96 @@ elif slice_choice == "FACULTY_CORNER":
         if "selected_faculty_sheet_row" not in st.session_state:
             st.session_state["selected_faculty_sheet_row"] = None
 
-        st.markdown("<div class='form-panel'><div class='section-tag'>Search & Filter</div>", unsafe_allow_html=True)
-        f_col1, f_col2, f_col3, f_col4 = st.columns([1.8, 1.1, 1.0, 1.4])
-        search_code_name = f_col1.text_input("Search Name / EMP_Code", "", placeholder="Type name or EMP_Code...", key="view_search_code_name").strip().lower()
-        search_sl = f_col2.text_input("Search SL", "", placeholder="Type SL...", key="view_search_sl").strip().lower()
-        categories = sorted({resolve_field_value(r, "CATEGORY") for r in faculty_rows if resolve_field_value(r, "CATEGORY")})
-        sel_status = f_col3.selectbox("Status", STATUS_OPTIONS, index=STATUS_OPTIONS.index("OK"), key="view_status")
-        sel_categories = f_col4.multiselect("Category", categories, default=[], placeholder="All Categories", key="view_categories")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        selected_cat_set = {c.strip() for c in sel_categories}
-        filtered_rows = []
-        for r in faculty_rows:
-            row_status = resolve_field_value(r, "Status")
-            if sel_status == "(Blanks)" and row_status != "":
-                continue
-            elif sel_status != "All" and row_status.lower() != sel_status.lower():
-                continue
-            if selected_cat_set and resolve_field_value(r, "CATEGORY") not in selected_cat_set:
-                continue
-            if search_sl and search_sl not in resolve_field_value(r, "SL").lower():
-                continue
-            if search_code_name:
-                hay = " ".join([
-                    resolve_field_value(r, "EMP_Code"),
-                    resolve_field_value(r, "EMP_Name") or resolve_field_value(r, "Emp_Name"),
-                    resolve_field_value(r, "Emp_Designation"),
-                ]).lower()
-                if search_code_name not in hay:
-                    continue
-            filtered_rows.append(r)
-
-        dept_groups = {}
-        for r in filtered_rows:
-            dept_name = resolve_field_value(r, "Emp_Department") or "Other / Unassigned Department"
-            desig_name = resolve_field_value(r, "Emp_Designation") or "Other / Unspecified"
-            dept_groups.setdefault(dept_name, {}).setdefault(desig_name, []).append(r)
-
-        sorted_dept_names = sorted(dept_groups.keys(), key=lambda x: (x == "Other / Unassigned Department", x.lower()))
         active_dept = st.session_state.get("selected_dept_in_view")
-        if (search_code_name or search_sl) and len(sorted_dept_names) == 1:
-            active_dept = sorted_dept_names[0]
-            st.session_state["selected_dept_in_view"] = active_dept
-        elif active_dept and active_dept not in dept_groups:
-            active_dept = None
-            st.session_state["selected_dept_in_view"] = None
+        sel_row_idx = st.session_state.get("selected_faculty_sheet_row")
 
-        st.markdown("<div class='section-tag'>Departments</div>", unsafe_allow_html=True)
-        for d_start in range(0, len(sorted_dept_names), 3):
-            d_chunk = sorted_dept_names[d_start:d_start + 3]
-            d_cols = st.columns(3)
-            for offset, d_name in enumerate(d_chunk):
-                d_count = sum(len(v) for v in dept_groups[d_name].values())
-                is_open = (active_dept == d_name)
-                if d_cols[offset].button(
-                    f"🏛️ {d_name} ({d_count})",
-                    key=f"dept_select_btn_{d_start}_{offset}",
-                    type="primary" if is_open else "secondary",
-                    use_container_width=True,
-                ):
-                    st.session_state["selected_dept_in_view"] = None if is_open else d_name
-                    st.session_state["selected_faculty_sheet_row"] = None
-                    st.rerun()
+        if not active_dept:
+            st.markdown("<div class='form-panel'><div class='section-tag'>Search & Filter</div>", unsafe_allow_html=True)
+            f_col1, f_col2, f_col3, f_col4 = st.columns([1.8, 1.1, 1.0, 1.4])
+            search_code_name = f_col1.text_input("Search Name / EMP_Code", "", placeholder="Type name or EMP_Code...", key="view_search_code_name").strip().lower()
+            search_sl = f_col2.text_input("Search SL", "", placeholder="Type SL...", key="view_search_sl").strip().lower()
+            categories = sorted({resolve_field_value(r, "CATEGORY") for r in faculty_rows if resolve_field_value(r, "CATEGORY")})
+            sel_status = f_col3.selectbox("Status", STATUS_OPTIONS, index=STATUS_OPTIONS.index("OK"), key="view_status")
+            sel_categories = f_col4.multiselect("Category", categories, default=[], placeholder="All Categories", key="view_categories")
+            st.markdown("</div>", unsafe_allow_html=True)
 
-        if active_dept and active_dept in dept_groups:
-            desig_map = dept_groups[active_dept]
-            dept_total = sum(len(v) for v in desig_map.values())
-            sorted_desigs = sorted(desig_map.keys(), key=get_designation_rank)
-            sel_row_idx = st.session_state.get("selected_faculty_sheet_row")
-            selected_fac_row = next((r for r in faculty_rows if r.get("_sheet_row") == sel_row_idx), None)
+            selected_cat_set = {c.strip() for c in sel_categories}
+            filtered_rows = []
+            for r in faculty_rows:
+                row_status = resolve_field_value(r, "Status")
+                if sel_status == "(Blanks)" and row_status != "":
+                    continue
+                elif sel_status != "All" and row_status.lower() != sel_status.lower():
+                    continue
+                if selected_cat_set and resolve_field_value(r, "CATEGORY") not in selected_cat_set:
+                    continue
+                if search_sl and search_sl not in resolve_field_value(r, "SL").lower():
+                    continue
+                if search_code_name:
+                    hay = " ".join([
+                        resolve_field_value(r, "EMP_Code"),
+                        resolve_field_value(r, "EMP_Name") or resolve_field_value(r, "Emp_Name"),
+                        resolve_field_value(r, "Emp_Designation"),
+                    ]).lower()
+                    if search_code_name not in hay:
+                        continue
+                filtered_rows.append(r)
 
-            st.markdown("<div class='dept-open-panel'>", unsafe_allow_html=True)
-            dh1, dh2 = st.columns([4.5, 1])
-            dh1.markdown(
-                f"<div class='section-tag'>Selected Department</div>"
-                f"<div style='font-size:20px;font-weight:700;color:#f8fafc;'>🏛️ {html.escape(active_dept)} "
-                f"<span style='font-size:13px;color:#5eead4;font-weight:600;'>({dept_total} Faculty)</span></div>",
-                unsafe_allow_html=True,
-            )
-            if dh2.button("✖ Close Dept", key="close_active_dept_btn", use_container_width=True):
-                st.session_state["selected_dept_in_view"] = None
+            dept_groups = {}
+            for r in filtered_rows:
+                dept_name = resolve_field_value(r, "Emp_Department") or "Other / Unassigned Department"
+                desig_name = resolve_field_value(r, "Emp_Designation") or "Other / Unspecified"
+                dept_groups.setdefault(dept_name, {}).setdefault(desig_name, []).append(r)
+
+            sorted_dept_names = sorted(dept_groups.keys(), key=lambda x: (x == "Other / Unassigned Department", x.lower()))
+
+            if (search_code_name or search_sl) and len(sorted_dept_names) == 1:
+                st.session_state["selected_dept_in_view"] = sorted_dept_names[0]
                 st.session_state["selected_faculty_sheet_row"] = None
                 st.rerun()
 
-            for desig_name in sorted_desigs:
-                fac_list = sorted(desig_map[desig_name], key=lambda x: (resolve_field_value(x, "EMP_Name") or resolve_field_value(x, "Emp_Name")).lower())
-                st.markdown(f"<div class='desig-sub-label'>{html.escape(desig_name)} ({len(fac_list)})</div>", unsafe_allow_html=True)
-                for start_i in range(0, len(fac_list), 4):
-                    chunk = fac_list[start_i:start_i + 4]
-                    btn_cols = st.columns(4)
-                    for col_offset, f_row in enumerate(chunk):
-                        f_sheet_row = f_row["_sheet_row"]
-                        f_name = resolve_field_value(f_row, "EMP_Name") or resolve_field_value(f_row, "Emp_Name") or "Unnamed"
-                        f_code = resolve_field_value(f_row, "EMP_Code")
-                        f_sl = resolve_field_value(f_row, "SL")
-                        meta_parts = [p for p in [f_code, f"SL:{f_sl}" if f_sl else ""] if p]
-                        meta_txt = f" ({', '.join(meta_parts)})" if meta_parts else ""
-                        if btn_cols[col_offset].button(
-                            f"👤 {f_name}{meta_txt}",
-                            key=f"fac_in_dept_btn_{f_sheet_row}",
-                            type="primary" if sel_row_idx == f_sheet_row else "secondary",
-                            use_container_width=True,
-                        ):
-                            st.session_state["selected_faculty_sheet_row"] = f_sheet_row
-                            st.rerun()
+            st.markdown("<div class='section-tag'>Departments</div>", unsafe_allow_html=True)
+            for d_start in range(0, len(sorted_dept_names), 3):
+                d_chunk = sorted_dept_names[d_start:d_start + 3]
+                d_cols = st.columns(3)
+                for offset, d_name in enumerate(d_chunk):
+                    d_count = sum(len(v) for v in dept_groups[d_name].values())
+                    if d_cols[offset].button(
+                        f"🏛️ {d_name} ({d_count})",
+                        key=f"dept_select_btn_{d_start}_{offset}",
+                        type="secondary",
+                        use_container_width=True,
+                    ):
+                        st.session_state["selected_dept_in_view"] = d_name
+                        st.session_state["selected_faculty_sheet_row"] = None
+                        st.rerun()
+
+        else:
+            dept_rows = [
+                r for r in faculty_rows
+                if (resolve_field_value(r, "Emp_Department") or "Other / Unassigned Department") == active_dept
+            ]
+            desig_map = {}
+            for r in dept_rows:
+                desig_name = resolve_field_value(r, "Emp_Designation") or "Other / Unspecified"
+                desig_map.setdefault(desig_name, []).append(r)
+
+            dept_total = len(dept_rows)
+            sorted_desigs = sorted(desig_map.keys(), key=get_designation_rank)
+            selected_fac_row = next((r for r in dept_rows if r.get("_sheet_row") == sel_row_idx), None)
+
+            st.markdown("<div class='dept-open-panel'>", unsafe_allow_html=True)
+            dh1, dh2 = st.columns([4.2, 1.3])
+            dh1.markdown(
+                f"<div class='section-tag'>Department View</div>"
+                f"<div style='font-size:21px;font-weight:700;color:#f8fafc;'>🏛️ {html.escape(active_dept)} "
+                f"<span style='font-size:13px;color:#5eead4;font-weight:600;'>({dept_total} Faculty)</span></div>",
+                unsafe_allow_html=True,
+            )
+            if dh2.button("⬅ Back to Departments", key="close_active_dept_btn", type="primary", use_container_width=True):
+                st.session_state["selected_dept_in_view"] = None
+                st.session_state["selected_faculty_sheet_row"] = None
+                st.rerun()
 
             if selected_fac_row is not None:
                 sel_name = resolve_field_value(selected_fac_row, "EMP_Name") or resolve_field_value(selected_fac_row, "Emp_Name") or "Unknown"
@@ -1748,7 +1865,7 @@ elif slice_choice == "FACULTY_CORNER":
                 roster_headers, roster_lookup_rows = load_worksheet_rows_with_index(SPREADSHEET_NAME, roster_tab) if roster_tab else ([], [])
 
                 st.markdown("<div class='profile-spotlight-box'>", unsafe_allow_html=True)
-                top_p1, top_p2 = st.columns([4.5, 1])
+                top_p1, top_p2 = st.columns([4.2, 1.3])
                 top_p1.markdown(
                     f"<div class='section-tag'>Faculty Details, Working Days & Present Summary</div>"
                     f"<div style='font-size:21px;font-weight:700;color:#f8fafc;'>{html.escape(sel_name)} "
@@ -1756,7 +1873,7 @@ elif slice_choice == "FACULTY_CORNER":
                     f"<div class='muted-sub' style='margin-top:2px;'>{html.escape(sel_desig or '-')}  •  {html.escape(sel_dept_name or '-')}</div>",
                     unsafe_allow_html=True,
                 )
-                if top_p2.button("✖ Close Details", key="close_faculty_spotlight_btn", use_container_width=True):
+                if top_p2.button("⬅ Back to Faculty List", key="close_faculty_spotlight_btn", use_container_width=True):
                     st.session_state["selected_faculty_sheet_row"] = None
                     st.rerun()
 
@@ -1780,12 +1897,12 @@ elif slice_choice == "FACULTY_CORNER":
                 st.markdown(f"<div style='font-weight:700;color:#2dd4bf;font-size:14.5px;margin-bottom:8px;'>📊 Working Days & Total Days Present ({html.escape(target_base_tab)} + Day-by-Day till 31/12/2026)</div>", unsafe_allow_html=True)
                 render_html_table([att_summary], max_rows=1)
 
-                norm_sel_code = sel_code.strip().lower()
+                norm_sel_code = re.sub(r"\s+", "", sel_code).lower()
                 norm_sel_name = re.sub(r"\s+", " ", sel_name.strip()).lower()
 
                 matched_leaves_s3 = [
                     lr for lr in sheet3_leave_rows
-                    if (norm_sel_code and resolve_field_value(lr, "EMP_Code").lower() == norm_sel_code)
+                    if (norm_sel_code and re.sub(r"\s+", "", resolve_field_value(lr, "EMP_Code")).lower() == norm_sel_code)
                     or ((not norm_sel_code or not resolve_field_value(lr, "EMP_Code")) and norm_sel_name and re.sub(r"\s+", " ", (resolve_field_value(lr, "Emp_Name") or resolve_field_value(lr, "EMP_Name")).lower()) == norm_sel_name)
                 ]
                 matched_leaves_s3.sort(key=get_leave_recent_sort_key, reverse=True)
@@ -1798,7 +1915,7 @@ elif slice_choice == "FACULTY_CORNER":
 
                 matched_dnp_rows = [
                     dr for dr in dnp_lookup_rows
-                    if (norm_sel_code and resolve_field_value(dr, "EMP_Code").lower() == norm_sel_code)
+                    if (norm_sel_code and re.sub(r"\s+", "", resolve_field_value(dr, "EMP_Code")).lower() == norm_sel_code)
                     or ((not norm_sel_code or not resolve_field_value(dr, "EMP_Code")) and norm_sel_name and re.sub(r"\s+", " ", (resolve_field_value(dr, "EMP_Name") or resolve_field_value(dr, "Emp_Name")).lower()) == norm_sel_name)
                 ]
                 matched_dnp_rows.sort(key=get_dnp_recent_sort_key, reverse=True)
@@ -1810,6 +1927,29 @@ elif slice_choice == "FACULTY_CORNER":
                     st.info(f"No Do Not Punch records found for {sel_name}.")
 
                 st.markdown("</div>", unsafe_allow_html=True)
+
+            else:
+                for desig_name in sorted_desigs:
+                    fac_list = sorted(desig_map[desig_name], key=lambda x: (resolve_field_value(x, "EMP_Name") or resolve_field_value(x, "Emp_Name")).lower())
+                    st.markdown(f"<div class='desig-sub-label'>{html.escape(desig_name)} ({len(fac_list)})</div>", unsafe_allow_html=True)
+                    for start_i in range(0, len(fac_list), 4):
+                        chunk = fac_list[start_i:start_i + 4]
+                        btn_cols = st.columns(4)
+                        for col_offset, f_row in enumerate(chunk):
+                            f_sheet_row = f_row["_sheet_row"]
+                            f_name = resolve_field_value(f_row, "EMP_Name") or resolve_field_value(f_row, "Emp_Name") or "Unnamed"
+                            f_code = resolve_field_value(f_row, "EMP_Code")
+                            f_sl = resolve_field_value(f_row, "SL")
+                            meta_parts = [p for p in [f_code, f"SL:{f_sl}" if f_sl else ""] if p]
+                            meta_txt = f" ({', '.join(meta_parts)})" if meta_parts else ""
+                            if btn_cols[col_offset].button(
+                                f"👤 {f_name}{meta_txt}",
+                                key=f"fac_in_dept_btn_{f_sheet_row}",
+                                type="secondary",
+                                use_container_width=True,
+                            ):
+                                st.session_state["selected_faculty_sheet_row"] = f_sheet_row
+                                st.rerun()
 
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1997,21 +2137,28 @@ elif slice_choice == "FACULTY_CORNER":
         st.markdown("</div>", unsafe_allow_html=True)
 
 
-# ================= SLICE 3: ROSTER (SHEET2) =================
+# ================= SLICE 3: ROSTER (WITH ROW DATE COLUMN SHOWING) =================
 elif slice_choice == "Roster":
     st.query_params["slice"] = "Roster"
     target_roster_tab = roster_tab or "Sheet2"
-
-    render_banner(
-        "Roster",
-        f"Tab: <b>{html.escape(target_roster_tab)}</b>  |  Sorted by: <b>SL (Ascending)</b>  |  Auto-Refresh: <b>{AUTO_REFRESH_SECONDS}s</b>",
-    )
 
     try:
         roster_headers, roster_rows = load_worksheet_rows_with_index(SPREADSHEET_NAME, target_roster_tab)
     except Exception as e:
         st.error(f"Failed to load '{target_roster_tab}': {e}")
         st.stop()
+
+    distinct_roster_dates = sorted(
+        {get_roster_row_date_str(r) for r in roster_rows if get_roster_row_date_str(r)},
+        key=lambda s: (parse_sheet_date(s) or date.min, s),
+        reverse=True,
+    )
+    dates_summary_txt = ", ".join(distinct_roster_dates[:5]) if distinct_roster_dates else "No Date column value"
+
+    render_banner(
+        "Roster",
+        f"Tab: <b>{html.escape(target_roster_tab)}</b>  |  Roster Dates: <b>{html.escape(dates_summary_txt)}</b>  |  Sorted by: <b>SL (Ascending)</b>",
+    )
 
     if not roster_rows:
         st.info(f"No records found in '{target_roster_tab}'.")
@@ -2023,18 +2170,21 @@ elif slice_choice == "Roster":
         if r_num in overrides:
             rr["_override_status"] = overrides[r_num]
 
-    rc1, rc2, rc3 = st.columns([2, 1.2, 0.8])
+    rc1, rc2, rc3, rc4 = st.columns([1.8, 1.1, 1.0, 0.75])
     r_search = rc1.text_input("Search Name / EMP_Code / SL", "", placeholder="Filter roster...", key="roster_filter_box").strip().lower()
     r_depts = sorted({resolve_field_value(r, "Emp_Department") for r in roster_rows if resolve_field_value(r, "Emp_Department")})
     r_dept = rc2.selectbox("Department", ["All"] + r_depts, key="roster_dept_filter")
-    page_size = rc3.selectbox("Rows / Page", [25, 50, 100, 250], index=1, key="roster_page_size")
+    r_date_filter = rc3.selectbox("Date", ["All"] + distinct_roster_dates, key="roster_date_filter")
+    page_size = rc4.selectbox("Rows / Page", [25, 50, 100, 250], index=1, key="roster_page_size")
 
     filtered_roster = []
     for rr in roster_rows:
         if r_dept != "All" and resolve_field_value(rr, "Emp_Department") != r_dept:
             continue
+        if r_date_filter != "All" and get_roster_row_date_str(rr) != r_date_filter:
+            continue
         if r_search:
-            hay = f"{resolve_field_value(rr, 'SL')} {resolve_field_value(rr, 'EMP_Code')} {resolve_field_value(rr, 'EMP_Name') or resolve_field_value(rr, 'Emp_Name')}".lower()
+            hay = f"{resolve_field_value(rr, 'SL')} {resolve_field_value(rr, 'EMP_Code')} {resolve_field_value(rr, 'EMP_Name') or resolve_field_value(rr, 'Emp_Name')} {get_roster_row_date_str(rr)}".lower()
             if r_search not in hay:
                 continue
         filtered_roster.append(rr)
@@ -2053,6 +2203,7 @@ elif slice_choice == "Roster":
         r_desig = resolve_field_value(rr, "Emp_Designation") or "-"
         r_dept_val = resolve_field_value(rr, "Emp_Department") or "-"
         r_sl = resolve_field_value(rr, "SL") or "-"
+        r_date_val = get_roster_row_date_str(rr) or "-"
         curr_status = get_roster_line_status(rr, roster_headers)
 
         if curr_status == "Found":
@@ -2062,14 +2213,15 @@ elif slice_choice == "Roster":
         else:
             st_badge = f"<span class='muted-sub'>{html.escape(curr_status or '-')}</span>"
 
-        c_sl, c_code, c_name, c_desig, c_dept_c, c_st, c_found, c_nf = st.columns(
-            [0.65, 1.0, 1.85, 1.45, 1.35, 0.95, 0.85, 1.05]
+        c_sl, c_code, c_name, c_desig, c_dept_c, c_date_c, c_st, c_found, c_nf = st.columns(
+            [0.60, 0.95, 1.70, 1.35, 1.25, 1.05, 0.90, 0.85, 1.05]
         )
         c_sl.markdown(f"<span style='font-weight:700;color:#5eead4;'>{html.escape(r_sl)}</span>", unsafe_allow_html=True)
         c_code.markdown(f"<span class='muted-sub'>{html.escape(r_code)}</span>", unsafe_allow_html=True)
         c_name.markdown(f"<div style='font-weight:600;color:#f8fafc;'>{html.escape(r_name)}</div>", unsafe_allow_html=True)
         c_desig.markdown(f"<span class='muted-sub'>{html.escape(r_desig)}</span>", unsafe_allow_html=True)
         c_dept_c.markdown(f"<span class='muted-sub'>{html.escape(r_dept_val)}</span>", unsafe_allow_html=True)
+        c_date_c.markdown(f"<span class='date-pill'>{html.escape(r_date_val)}</span>", unsafe_allow_html=True)
         c_st.markdown(st_badge, unsafe_allow_html=True)
 
         if c_found.button("Found", key=f"roster_found_{r_num}", use_container_width=True):
@@ -2083,9 +2235,9 @@ elif slice_choice == "Roster":
                     current_user,
                     action="Roster Found",
                     module="Roster",
-                    details=f"SL {r_sl} — {r_name} ({r_code}) marked 'Found' in '{col_name}'.",
+                    details=f"SL {r_sl} — {r_name} ({r_code}) [Date: {r_date_val}] marked 'Found' in '{col_name}'.",
                 )
-                st.toast(f"{r_name}: Found", icon="✅")
+                st.toast(f"{r_name} ({r_date_val}): Found", icon="✅")
                 st.rerun()
             except Exception as e:
                 st.error(f"Save failed: {e}")
@@ -2101,9 +2253,9 @@ elif slice_choice == "Roster":
                     current_user,
                     action="Roster Not Found",
                     module="Roster",
-                    details=f"SL {r_sl} — {r_name} ({r_code}) marked 'Not Found' in '{col_name}'.",
+                    details=f"SL {r_sl} — {r_name} ({r_code}) [Date: {r_date_val}] marked 'Not Found' in '{col_name}'.",
                 )
-                st.toast(f"{r_name}: Not Found", icon="❌")
+                st.toast(f"{r_name} ({r_date_val}): Not Found", icon="❌")
                 st.rerun()
             except Exception as e:
                 st.error(f"Save failed: {e}")
@@ -2114,10 +2266,7 @@ elif slice_choice == "Roster":
 
 # ================= SLICE 4: LEAVE MANAGEMENT =================
 elif slice_choice == "Leave":
-    render_banner(
-        "Leave Management",
-        f"Spreadsheet: <b>{html.escape(SPREADSHEET_NAME)}</b>  |  Source Tab: <b>{html.escape(str(faculty_tab))}</b>  |  Leave Tab: <b>{html.escape(str(leave_tab))}</b>",
-    )
+    render_banner("Leave Management")
     if not leave_tab:
         st.warning("No leave worksheet tab found.")
         st.stop()
@@ -2135,6 +2284,9 @@ elif slice_choice == "Leave":
         st.session_state["confirm_delete_leave_row"] = None
 
     today_val = date.today()
+    tomorrow_val = today_val + timedelta(days=1)
+    today_full_str = today_val.strftime("%Y-%m-%d")
+
     tab_upcoming, tab_suggest, tab_all_records, tab_add_leave = st.tabs([
         "📅 Upcoming Leave",
         "💡 Leave Suggest",
@@ -2143,12 +2295,19 @@ elif slice_choice == "Leave":
     ])
 
     with tab_upcoming:
-        st.subheader(f"Upcoming Leave (Upto ≥ {today_val.strftime('%Y-%m-%d')})")
-        uc1, uc2, uc3 = st.columns([2, 1, 1])
+        st.subheader("Upcoming Leave")
+        uc1, uc2, uc3 = st.columns([2, 1, 1.2])
         leave_search = uc1.text_input("Search by EMP_Code, Name, or SL", "", placeholder="Search faculty...", key="leave_upcoming_search").strip().lower()
         leave_depts = sorted({str(r.get("Emp_Department", "")).strip() for r in leave_rows if str(r.get("Emp_Department", "")).strip()})
         sel_leave_dept = uc2.selectbox("Department", ["All"] + leave_depts, key="leave_upcoming_dept")
-        uc3.metric("Today's Date", today_val.strftime("%Y-%m-%d"))
+        uc3.markdown(
+            f"<div class='today-highlight-card'>"
+            f"<div><div class='today-highlight-label'>Today's Date</div>"
+            f"<div class='today-highlight-date'>{html.escape(today_full_str)}</div></div>"
+            f"<span style='font-size:20px;'>📆</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
         upcoming_rows = []
         for r in leave_rows:
@@ -2165,7 +2324,127 @@ elif slice_choice == "Leave":
 
         upcoming_rows.sort(key=lambda row: parse_sheet_date(row.get("Upto", "")) or date.max)
         st.metric("Total Upcoming Leave Records", len(upcoming_rows))
-        render_html_table(upcoming_rows, max_rows=300)
+
+        # Inline Edit form for Upcoming Leave
+        up_edit_row_num = st.session_state.get("editing_leave_sheet_row")
+        up_row_to_edit = next((r for r in upcoming_rows if r.get("_sheet_row") == up_edit_row_num), None)
+        if up_row_to_edit is not None:
+            up_edit_name = str(up_row_to_edit.get("Emp_Name", up_row_to_edit.get("EMP_Name", ""))).strip()
+            up_edit_code = str(up_row_to_edit.get("EMP_Code", "")).strip()
+            st.markdown(
+                f"<div class='form-panel'><div class='section-tag'>Edit Upcoming Leave</div>"
+                f"<div style='font-size:18px;font-weight:700;color:#f8fafc;'>{html.escape(up_edit_name)} ({html.escape(up_edit_code)})</div>",
+                unsafe_allow_html=True,
+            )
+            p_from = parse_sheet_date(up_row_to_edit.get("From", "")) or today_val
+            p_upto = parse_sheet_date(up_row_to_edit.get("Upto", "")) or p_from
+            ud1, ud2 = st.columns(2)
+            new_u_from = ud1.date_input("From", value=p_from, key=f"up_ed_from_{up_edit_row_num}")
+            new_u_upto = ud2.date_input("Upto", value=p_upto, key=f"up_ed_upto_{up_edit_row_num}")
+
+            c_ltype = str(up_row_to_edit.get("Leave_types", "")).strip()
+            c_astatus = str(up_row_to_edit.get("Applying_Stutas.", up_row_to_edit.get("Applying_Status", ""))).strip()
+            c_action = str(up_row_to_edit.get("Take_Action_By", "")).strip()
+            lt_opts = list(dict.fromkeys(LEAVE_TYPE_OPTIONS + ([c_ltype] if c_ltype else [])))
+            as_opts = list(dict.fromkeys(APPLYING_STATUS_OPTIONS + ([c_astatus] if c_astatus else [])))
+            ac_opts = list(dict.fromkeys(TAKE_ACTION_BY_OPTIONS + ([c_action] if c_action else [])))
+
+            ue1, ue2, ue3 = st.columns(3)
+            new_u_ltype = ue1.selectbox("Leave_types", lt_opts, index=find_option_index(lt_opts, c_ltype), key=f"up_ed_type_{up_edit_row_num}")
+            new_u_astatus = ue2.selectbox("Applying_Stutas.", as_opts, index=find_option_index(as_opts, c_astatus), key=f"up_ed_status_{up_edit_row_num}")
+            new_u_action = ue3.selectbox("Take_Action_By", ac_opts, index=find_option_index(ac_opts, c_action), key=f"up_ed_action_{up_edit_row_num}")
+
+            frozen_u_cols = {"", "EMP_Code", "Emp_Name", "EMP_Name", "Emp_Designation", "Emp_Department", "SL"}
+            ub1, ub2 = st.columns([1.2, 4])
+            if ub1.button("Update Leave", type="primary", key=f"up_ed_save_{up_edit_row_num}", use_container_width=True):
+                if new_u_upto < new_u_from:
+                    st.error("Upto date cannot be earlier than From date.")
+                else:
+                    upd_payload = {}
+                    for h in leave_headers:
+                        hc = h.strip()
+                        if not hc:
+                            continue
+                        if hc in frozen_u_cols:
+                            upd_payload[h] = str(up_row_to_edit.get(h, ""))
+                        elif hc == "From":
+                            upd_payload[h] = new_u_from.strftime("%Y-%m-%d")
+                        elif hc == "Upto":
+                            upd_payload[h] = new_u_upto.strftime("%Y-%m-%d")
+                        elif hc == "Leave_types":
+                            upd_payload[h] = str(new_u_ltype or "").strip()
+                        elif hc in {"Applying_Stutas.", "Applying_Status"}:
+                            upd_payload[h] = str(new_u_astatus or "").strip()
+                        elif hc == "Take_Action_By":
+                            upd_payload[h] = str(new_u_action or "").strip()
+                        else:
+                            upd_payload[h] = str(up_row_to_edit.get(h, ""))
+                    update_sheet_row(SPREADSHEET_NAME, leave_tab, leave_headers, up_edit_row_num, upd_payload)
+                    write_activity_log(SPREADSHEET_NAME, current_user, "Edit Leave", "Leave", f"Updated upcoming leave row {up_edit_row_num} for {up_edit_name}")
+                    st.session_state["editing_leave_sheet_row"] = None
+                    st.success("Upcoming leave updated!")
+                    st.rerun()
+            if ub2.button("Cancel Edit", key=f"up_ed_cancel_{up_edit_row_num}"):
+                st.session_state["editing_leave_sheet_row"] = None
+                st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        if upcoming_rows:
+            ok_map = st.session_state["upcoming_leave_ok_map"]
+            st.markdown("<div class='form-panel'><div class='section-tag'>Upcoming Leave List</div>", unsafe_allow_html=True)
+            for rec in upcoming_rows:
+                r_num = rec["_sheet_row"]
+                r_code = str(rec.get("EMP_Code", "")).strip() or "-"
+                r_name = str(rec.get("Emp_Name", rec.get("EMP_Name", ""))).strip() or "-"
+                r_desig = str(rec.get("Emp_Designation", "")).strip() or "-"
+                r_dept = str(rec.get("Emp_Department", "")).strip() or "-"
+                r_from_str = str(rec.get("From", "")).strip() or "-"
+                r_upto_str = str(rec.get("Upto", "")).strip() or "-"
+                r_ltype = str(rec.get("Leave_types", "")).strip() or "-"
+
+                from_dt = parse_sheet_date(r.get("From", ""))
+                upto_dt = parse_sheet_date(r.get("Upto", ""))
+
+                # OK button is enabled ONLY for tomorrow's date
+                is_tomorrow_leave = is_date_in_range(tomorrow_val, from_dt, upto_dt)
+                ok_key = f"{r_num}_{tomorrow_val.isoformat()}"
+                is_marked_ok = bool(ok_map.get(ok_key, False))
+                row_cls = "upcoming-row-green" if is_marked_ok else "upcoming-row-red"
+
+                st.markdown(f"<div class='{row_cls}'>", unsafe_allow_html=True)
+                cols_up = st.columns([0.95, 1.85, 1.30, 1.25, 1.55, 0.80, 0.80, 0.90])
+                cols_up[0].markdown(f"<div style='font-size:12.5px;font-weight:600;'>{html.escape(r_code)}</div>", unsafe_allow_html=True)
+                cols_up[1].markdown(f"<div style='font-size:13.5px;font-weight:700;'>{html.escape(r_name)}</div>", unsafe_allow_html=True)
+                cols_up[2].markdown(f"<div style='font-size:12.5px;'>{html.escape(r_desig)}</div>", unsafe_allow_html=True)
+                cols_up[3].markdown(f"<div style='font-size:12.5px;'>{html.escape(r_dept)}</div>", unsafe_allow_html=True)
+                cols_up[4].markdown(f"<div style='font-size:12.5px;font-weight:600;'>{html.escape(r_from_str)} → {html.escape(r_upto_str)}</div>", unsafe_allow_html=True)
+                cols_up[5].markdown(f"<div style='font-size:12.5px;font-weight:700;'>{html.escape(r_ltype)}</div>", unsafe_allow_html=True)
+
+                if cols_up[6].button("Edit", key=f"btn_edit_up_lv_{r_num}", use_container_width=True):
+                    st.session_state["editing_leave_sheet_row"] = r_num
+                    st.rerun()
+
+                ok_label = "✅ OK" if is_marked_ok else "OK"
+                if cols_up[7].button(
+                    ok_label,
+                    key=f"btn_ok_up_lv_{r_num}",
+                    disabled=not is_tomorrow_leave,
+                    use_container_width=True,
+                ):
+                    new_ok_state = not is_marked_ok
+                    st.session_state["upcoming_leave_ok_map"][ok_key] = new_ok_state
+                    write_activity_log(
+                        SPREADSHEET_NAME,
+                        current_user,
+                        action="Upcoming Leave Action OK" if new_ok_state else "Upcoming Leave Action Undo",
+                        module="Leave",
+                        details=f"Row {r_num} — {r_name} ({r_code}) for tomorrow ({tomorrow_val.isoformat()}) set to {'OK (Green)' if new_ok_state else 'Pending (Red)'}.",
+                    )
+                    st.rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.info("No upcoming leave records found.")
 
     with tab_suggest:
         st.subheader("Leave Suggest (Longest Days Since Latest Upto)")
@@ -2280,7 +2559,7 @@ elif slice_choice == "Leave":
 
         editing_row_num = st.session_state.get("editing_leave_sheet_row")
         row_to_edit = next((r for r in leave_rows if r.get("_sheet_row") == editing_row_num), None)
-        if row_to_edit is not None:
+        if row_to_edit is not None and not any(r.get("_sheet_row") == editing_row_num for r in upcoming_rows):
             edit_name = str(row_to_edit.get("Emp_Name", row_to_edit.get("EMP_Name", ""))).strip()
             edit_code = str(row_to_edit.get("EMP_Code", "")).strip()
             st.markdown(f"<div class='form-panel'><div class='section-tag'>Edit Leave Record</div><div style='font-size:18px;font-weight:700;color:#f8fafc;'>{html.escape(edit_name)} ({html.escape(edit_code)})</div>", unsafe_allow_html=True)
@@ -2533,18 +2812,7 @@ elif slice_choice == "Do Not Punch":
         render_html_table(sorted_dnp, max_rows=300)
 
 
-# ================= SLICE 6: OTHER SHEET TABS =================
-elif slice_choice == "Other Sheet Tabs":
-    render_banner("Other Sheet Tabs", f"Spreadsheet: <b>{html.escape(SPREADSHEET_NAME)}</b>")
-    known = {t for t in [faculty_tab, leave_tab, dnp_tab, attendance_base_tab, roster_tab, USERS_TAB_NAME, LOGS_TAB_NAME, REQUESTS_TAB_NAME] if t}
-    other_tabs = [t for t in all_tabs if t not in known] or [t for t in all_tabs if t not in {USERS_TAB_NAME, LOGS_TAB_NAME, REQUESTS_TAB_NAME}]
-    if other_tabs:
-        selected_tab = st.selectbox("Select Tab", other_tabs)
-        _, tab_rows = load_worksheet_rows_with_index(SPREADSHEET_NAME, selected_tab)
-        render_html_table(tab_rows, max_rows=150)
-
-
-# ================= SLICE 7: USERS, SECURITY, LOGS & ADMIN NOTICES =================
+# ================= SLICE 6: USERS, SECURITY, LOGS & ADMIN NOTICES =================
 elif slice_choice == "Users":
     render_banner(
         "Security & Password" if not is_admin_user else "Users, Activity Logs & Admin Notices",
