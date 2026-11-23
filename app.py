@@ -36,8 +36,12 @@ REQUESTS_TAB_NAME = "Feature_Requests"
 ATTENDANCE_BASE_TAB_CANDIDATES = ["Sheet8", "Sheet 8", "Attendance", "ATTENDANCE"]
 ROSTER_TAB_CANDIDATES = ["Sheet2", "Sheet 2", "Roster", "ROSTER"]
 ROSTER_STATUS_COLUMN = "Found_Status"
-AUTO_REFRESH_SECONDS = 120
+AUTO_REFRESH_SECONDS = 60
 CACHE_TTL_SECONDS = 90
+
+# Notification schedules (for records where target From date == today + 1 day)
+DNP_NOTIFY_SLOTS = [(11, 0), (16, 0), (17, 30), (20, 0)]
+LEAVE_NOTIFY_SLOTS = [(17, 0), (20, 0)]
 
 # Sheet8 base period: 01/01/2026 to 20/11/2026; forward projection up to 31/12/2026
 BASE_PERIOD_END = date(2026, 11, 20)
@@ -298,6 +302,28 @@ div[data-testid="stSidebar"] div.stButton > button[kind="primary"] {
     margin-top: 6px;
 }
 
+.notify-alert-card {
+    background: linear-gradient(120deg, rgba(245, 158, 11, 0.18), rgba(239, 68, 68, 0.14));
+    border: 1px solid rgba(251, 191, 36, 0.55);
+    border-left: 4px solid #f59e0b;
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-bottom: 12px;
+}
+
+.notify-alert-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #fde68a;
+    margin-bottom: 4px;
+}
+
+.notify-alert-item {
+    font-size: 13px;
+    color: #f8fafc;
+    margin: 3px 0;
+}
+
 .today-highlight-card {
     background: linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(168, 85, 247, 0.16));
     border: 1px solid rgba(56, 189, 248, 0.55);
@@ -554,23 +580,162 @@ div[class*="st-key-roster_not_found_"] button:hover {
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
-def inject_auto_refresh(interval_seconds: int = AUTO_REFRESH_SECONDS, enabled: bool = False):
-    if not enabled or interval_seconds <= 0:
+def get_current_ist_now() -> datetime:
+    return datetime.utcnow() + timedelta(hours=5, minutes=30)
+
+
+def get_active_slot_for_now(now_dt: datetime, slots: list):
+    now_mins = now_dt.hour * 60 + now_dt.minute
+    active_slot = None
+    for hr, mn in sorted(slots):
+        slot_mins = hr * 60 + mn
+        if now_mins >= slot_mins:
+            active_slot = (hr, mn)
+    return active_slot
+
+
+def format_slot_label(slot_tuple) -> str:
+    if not slot_tuple:
+        return ""
+    dt_obj = datetime(2026, 1, 1, slot_tuple[0], slot_tuple[1])
+    return dt_obj.strftime("%I:%M %p").lstrip("0")
+
+
+def trigger_browser_notifications(alerts: list, slot_tag: str):
+    if not alerts:
         return
-    ms = int(interval_seconds * 1000)
+    payload_items = [
+        {"title": a["title"], "body": a["body"], "tag": f"{slot_tag}_{i}"}
+        for i, a in enumerate(alerts[:6])
+    ]
+    js_json = json.dumps(payload_items)
     components.html(
         f"""
         <script>
         (function() {{
-            if (window.__timeshRefreshTimer) {{
-                clearTimeout(window.__timeshRefreshTimer);
+            const items = {js_json};
+            if (!("Notification" in window)) return;
+            const showAll = () => {{
+                items.forEach((it) => {{
+                    try {{
+                        const n = new Notification(it.title, {{ body: it.body, tag: it.tag }});
+                        setTimeout(() => n.close(), 12000);
+                    }} catch (e) {{}}
+                }});
+            }};
+            if (Notification.permission === "granted") {{
+                showAll();
+            }} else if (Notification.permission !== "denied") {{
+                Notification.requestPermission().then((perm) => {{
+                    if (perm === "granted") showAll();
+                }});
             }}
-            window.__timeshRefreshTimer = setTimeout(function() {{
+        }})();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+def collect_scheduled_notifications(leave_rows: list, dnp_rows: list, now_dt: datetime) -> list:
+    today_d = now_dt.date()
+    target_from_date = today_d + timedelta(days=1)
+
+    active_dnp_slot = get_active_slot_for_now(now_dt, DNP_NOTIFY_SLOTS)
+    active_leave_slot = get_active_slot_for_now(now_dt, LEAVE_NOTIFY_SLOTS)
+
+    notifications = []
+
+    if active_dnp_slot is not None:
+        dnp_slot_label = format_slot_label(active_dnp_slot)
+        for r in (dnp_rows or []):
+            from_dt = parse_sheet_date(
+                resolve_field_value(r, "Do Not Punch From") or r.get("Do Not Punch From", "")
+            )
+            if from_dt == target_from_date:
+                emp_name = resolve_field_value(r, "EMP_Name") or resolve_field_value(r, "Emp_Name") or "-"
+                emp_code = resolve_field_value(r, "EMP_Code") or "-"
+                dept = resolve_field_value(r, "Emp_Department") or "-"
+                upto_str = resolve_field_value(r, "Do Not Punch Upto") or r.get("Do Not Punch Upto", "") or "-"
+                slot_key = f"dnp_{today_d.isoformat()}_{active_dnp_slot[0]:02d}{active_dnp_slot[1]:02d}_row{r.get('_sheet_row')}"
+                notifications.append({
+                    "key": slot_key,
+                    "kind": "Do Not Punch",
+                    "slot_label": dnp_slot_label,
+                    "title": f"Do Not Punch Alert ({dnp_slot_label})",
+                    "body": f"{emp_name} ({emp_code}, {dept}) — Do Not Punch starts tomorrow ({target_from_date.isoformat()}) Upto {upto_str}.",
+                })
+
+    if active_leave_slot is not None:
+        leave_slot_label = format_slot_label(active_leave_slot)
+        for r in (leave_rows or []):
+            from_dt = parse_sheet_date(
+                resolve_field_value(r, "From") or r.get("From", "")
+            )
+            if from_dt == target_from_date:
+                emp_name = resolve_field_value(r, "Emp_Name") or resolve_field_value(r, "EMP_Name") or "-"
+                emp_code = resolve_field_value(r, "EMP_Code") or "-"
+                dept = resolve_field_value(r, "Emp_Department") or "-"
+                ltype = resolve_field_value(r, "Leave_types") or "-"
+                upto_str = resolve_field_value(r, "Upto") or r.get("Upto", "") or "-"
+                slot_key = f"leave_{today_d.isoformat()}_{active_leave_slot[0]:02d}{active_leave_slot[1]:02d}_row{r.get('_sheet_row')}"
+                notifications.append({
+                    "key": slot_key,
+                    "kind": "Leave",
+                    "slot_label": leave_slot_label,
+                    "title": f"Leave Alert ({leave_slot_label})",
+                    "body": f"{emp_name} ({emp_code}, {dept}) — {ltype} Leave starts tomorrow ({target_from_date.isoformat()}) Upto {upto_str}.",
+                })
+
+    return notifications
+
+
+def find_nearest_upcoming_roster_date(date_strings: list, reference_date: date):
+    parsed_pairs = []
+    for ds in (date_strings or []):
+        dt = parse_sheet_date(ds)
+        if dt is not None:
+            parsed_pairs.append((dt, ds))
+    if not parsed_pairs:
+        return None
+
+    upcoming_or_today = [item for item in parsed_pairs if item[0] >= reference_date]
+    if upcoming_or_today:
+        upcoming_or_today.sort(key=lambda x: x[0])
+        return upcoming_or_today[0][1]
+
+    parsed_pairs.sort(key=lambda x: x[0])
+    return parsed_pairs[-1][1]
+
+
+def inject_auto_refresh(interval_seconds: int = AUTO_REFRESH_SECONDS, enabled: bool = False):
+    if not enabled or interval_seconds <= 0:
+        return
+    ms = int(interval_seconds * 1000)
+    # Trigger Streamlit soft rerun via host/parent DOM event without full-page reload that drops session state
+    components.html(
+        f"""
+        <script>
+        (function() {{
+            const win = window.parent || window;
+            if (win.__timeshSoftTimer) {{
+                clearInterval(win.__timeshSoftTimer);
+            }}
+            win.__timeshSoftTimer = setInterval(function() {{
                 try {{
-                    window.parent.location.reload();
-                }} catch (e) {{
-                    window.location.reload();
-                }}
+                    const doc = win.document;
+                    const rerunBtn = Array.from(doc.querySelectorAll('button')).find(
+                        (b) => (b.innerText || '').trim().toLowerCase() === 'rerun'
+                    );
+                    if (rerunBtn) {{
+                        rerunBtn.click();
+                        return;
+                    }}
+                    doc.dispatchEvent(new KeyboardEvent('keydown', {{
+                        key: 'r', code: 'KeyR', bubbles: true, cancelable: true
+                    }}));
+                }} catch (e) {{}}
             }}, {ms});
         }})();
         </script>
@@ -1500,14 +1665,17 @@ if not sheet_users_db:
 if "logged_in_user" not in st.session_state:
     st.session_state["logged_in_user"] = None
 if "auto_refresh_enabled" not in st.session_state:
-    st.session_state["auto_refresh_enabled"] = False
+    st.session_state["auto_refresh_enabled"] = True
 if "roster_status_overrides" not in st.session_state:
     st.session_state["roster_status_overrides"] = {}
 if "upcoming_leave_ok_map" not in st.session_state:
     st.session_state["upcoming_leave_ok_map"] = {}
+if "dismissed_notifications" not in st.session_state:
+    st.session_state["dismissed_notifications"] = set()
+if "toasted_notifications" not in st.session_state:
+    st.session_state["toasted_notifications"] = set()
 
 if st.session_state["logged_in_user"] is None:
-    inject_auto_refresh(AUTO_REFRESH_SECONDS, enabled=st.session_state["auto_refresh_enabled"])
     st.markdown(
         "<div class='login-minimal-brand'>"
         "<div class='login-minimal-title'>TIMESH</div>"
@@ -1568,6 +1736,7 @@ elif qp_slice in valid_nav_keys and qp_slice != st.session_state.get("_last_qp_s
 elif st.session_state.get("active_nav_slice") not in valid_nav_keys:
     st.session_state["active_nav_slice"] = "Analytics Dashboard"
 st.session_state["_last_qp_slice"] = qp_slice
+st.query_params["slice"] = st.session_state["active_nav_slice"]
 
 try:
     all_tabs = get_all_tab_names(SPREADSHEET_NAME)
@@ -1588,7 +1757,9 @@ dnp_tab = next((t for t in dnp_tab_candidates if t in all_tabs), None)
 
 attendance_base_tab = next((t for t in ATTENDANCE_BASE_TAB_CANDIDATES if t in all_tabs), None)
 
-today_now = date.today()
+now_ist = get_current_ist_now()
+today_now = now_ist.date()
+
 try:
     _, nav_leave_rows = load_worksheet_rows_with_index(SPREADSHEET_NAME, leave_tab) if leave_tab else ([], [])
     upcoming_leave_count = count_upcoming_leaves(nav_leave_rows, today_now)
@@ -1658,6 +1829,7 @@ with st.sidebar:
         f"<div class='sidebar-info-box'>"
         f"<div class='sidebar-info-row'><span>User</span><span class='sidebar-info-val'>{html.escape(str(current_user.get('name', '-')))}</span></div>"
         f"<div class='sidebar-info-row'><span>Role</span><span class='sidebar-info-val'>{html.escape(str(current_user.get('role', '-')).upper())}</span></div>"
+        f"<div class='sidebar-info-row'><span>IST Time</span><span class='sidebar-info-val'>{html.escape(now_ist.strftime('%I:%M %p'))}</span></div>"
         f"</div>",
         unsafe_allow_html=True,
     )
@@ -1683,6 +1855,35 @@ with st.sidebar:
         )
         st.session_state["logged_in_user"] = None
         st.rerun()
+
+due_notifications = collect_scheduled_notifications(nav_leave_rows, nav_dnp_rows, now_ist)
+unseen_toasts = [n for n in due_notifications if n["key"] not in st.session_state["toasted_notifications"]]
+if unseen_toasts:
+    for item_n in unseen_toasts:
+        st.toast(f"🔔 {item_n['title']}: {item_n['body']}", icon="⏰")
+        st.session_state["toasted_notifications"].add(item_n["key"])
+    trigger_browser_notifications(unseen_toasts, f"timesh_{today_now.isoformat()}")
+
+visible_alerts = [n for n in due_notifications if n["key"] not in st.session_state["dismissed_notifications"]]
+if visible_alerts:
+    lines_html = "".join(
+        f"<div class='notify-alert-item'>• <b>[{html.escape(al['kind'])} · {html.escape(al['slot_label'])}]</b> {html.escape(al['body'])}</div>"
+        for al in visible_alerts
+    )
+    al_col1, al_col2 = st.columns([5.2, 1.0])
+    with al_col1:
+        st.markdown(
+            f"<div class='notify-alert-card'>"
+            f"<div class='notify-alert-title'>⏰ Scheduled Reminders ({len(visible_alerts)})</div>"
+            f"{lines_html}"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+    with al_col2:
+        if st.button("Dismiss", key="dismiss_due_notifications_btn", use_container_width=True):
+            for al in visible_alerts:
+                st.session_state["dismissed_notifications"].add(al["key"])
+            st.rerun()
 
 inject_auto_refresh(AUTO_REFRESH_SECONDS, enabled=st.session_state["auto_refresh_enabled"])
 
@@ -2137,7 +2338,7 @@ elif slice_choice == "FACULTY_CORNER":
         st.markdown("</div>", unsafe_allow_html=True)
 
 
-# ================= SLICE 3: ROSTER (WITH ROW DATE COLUMN SHOWING) =================
+# ================= SLICE 3: ROSTER (NEAREST UPCOMING DATE DEFAULT) =================
 elif slice_choice == "Roster":
     st.query_params["slice"] = "Roster"
     target_roster_tab = roster_tab or "Sheet2"
@@ -2151,13 +2352,13 @@ elif slice_choice == "Roster":
     distinct_roster_dates = sorted(
         {get_roster_row_date_str(r) for r in roster_rows if get_roster_row_date_str(r)},
         key=lambda s: (parse_sheet_date(s) or date.min, s),
-        reverse=True,
     )
-    dates_summary_txt = ", ".join(distinct_roster_dates[:5]) if distinct_roster_dates else "No Date column value"
+    nearest_upcoming_date_str = find_nearest_upcoming_roster_date(distinct_roster_dates, today_now)
+    active_date_label = nearest_upcoming_date_str or "All Dates"
 
     render_banner(
         "Roster",
-        f"Tab: <b>{html.escape(target_roster_tab)}</b>  |  Roster Dates: <b>{html.escape(dates_summary_txt)}</b>  |  Sorted by: <b>SL (Ascending)</b>",
+        f"Tab: <b>{html.escape(target_roster_tab)}</b>  |  Nearest Upcoming Date: <b>{html.escape(active_date_label)}</b>  |  Sorted by: <b>SL (Ascending)</b>",
     )
 
     if not roster_rows:
@@ -2170,11 +2371,16 @@ elif slice_choice == "Roster":
         if r_num in overrides:
             rr["_override_status"] = overrides[r_num]
 
+    date_filter_options = (distinct_roster_dates + ["All"]) if distinct_roster_dates else ["All"]
+    default_date_idx = 0
+    if nearest_upcoming_date_str and nearest_upcoming_date_str in date_filter_options:
+        default_date_idx = date_filter_options.index(nearest_upcoming_date_str)
+
     rc1, rc2, rc3, rc4 = st.columns([1.8, 1.1, 1.0, 0.75])
     r_search = rc1.text_input("Search Name / EMP_Code / SL", "", placeholder="Filter roster...", key="roster_filter_box").strip().lower()
     r_depts = sorted({resolve_field_value(r, "Emp_Department") for r in roster_rows if resolve_field_value(r, "Emp_Department")})
     r_dept = rc2.selectbox("Department", ["All"] + r_depts, key="roster_dept_filter")
-    r_date_filter = rc3.selectbox("Date", ["All"] + distinct_roster_dates, key="roster_date_filter")
+    r_date_filter = rc3.selectbox("Date", date_filter_options, index=default_date_idx, key="roster_date_filter")
     page_size = rc4.selectbox("Rows / Page", [25, 50, 100, 250], index=1, key="roster_page_size")
 
     filtered_roster = []
@@ -2283,7 +2489,7 @@ elif slice_choice == "Leave":
     if not is_admin_user:
         st.session_state["confirm_delete_leave_row"] = None
 
-    today_val = date.today()
+    today_val = today_now
     tomorrow_val = today_val + timedelta(days=1)
     today_full_str = today_val.strftime("%Y-%m-%d")
 
@@ -2325,7 +2531,6 @@ elif slice_choice == "Leave":
         upcoming_rows.sort(key=lambda row: parse_sheet_date(row.get("Upto", "")) or date.max)
         st.metric("Total Upcoming Leave Records", len(upcoming_rows))
 
-        # Inline Edit form for Upcoming Leave
         up_edit_row_num = st.session_state.get("editing_leave_sheet_row")
         up_row_to_edit = next((r for r in upcoming_rows if r.get("_sheet_row") == up_edit_row_num), None)
         if up_row_to_edit is not None:
@@ -2405,7 +2610,6 @@ elif slice_choice == "Leave":
                 from_dt = parse_sheet_date(r.get("From", ""))
                 upto_dt = parse_sheet_date(r.get("Upto", ""))
 
-                # OK button is enabled ONLY for tomorrow's date
                 is_tomorrow_leave = is_date_in_range(tomorrow_val, from_dt, upto_dt)
                 ok_key = f"{r_num}_{tomorrow_val.isoformat()}"
                 is_marked_ok = bool(ok_map.get(ok_key, False))
@@ -2728,7 +2932,7 @@ elif slice_choice == "Do Not Punch":
     if not is_admin_user:
         st.session_state["confirm_delete_dnp_row"] = None
 
-    today_val = date.today()
+    today_val = today_now
     tab_dnp_add, tab_dnp_records = st.tabs(["➕ Add", "📄 Do Not Punch Record"])
 
     with tab_dnp_add:
