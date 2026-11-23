@@ -1,17 +1,20 @@
+import base64
 import hashlib
 import hmac
 import html
+import json
 import math
 import os
-import json
 import re
 import urllib.parse
 from datetime import date, datetime, timedelta
+
 import gspread
 import streamlit as st
 import streamlit.components.v1 as components
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 
 st.set_page_config(
@@ -63,26 +66,53 @@ LEAVE_TYPE_OPTIONS = ["CL", "El", "CCL"]
 APPLYING_STATUS_OPTIONS = ["YES", "NO"]
 TAKE_ACTION_BY_OPTIONS = ["Julfikkar", "Azad", "Safiur"]
 
+PASSWORD_HASH_ITERATIONS = 310_000
 
-def hash_password(password: str, salt: str = "timesh_secure_salt_2026") -> str:
-    return hashlib.sha256(f"{salt}:{password}".encode("utf-8")).hexdigest()
+
+def hash_password(password: str, salt: str = None) -> str:
+    """Create a salted PBKDF2-SHA256 password hash."""
+    salt_bytes = os.urandom(16) if salt is None else str(salt).encode("utf-8")
+    derived = hashlib.pbkdf2_hmac(
+        "sha256", str(password).encode("utf-8"), salt_bytes, PASSWORD_HASH_ITERATIONS
+    )
+    salt_text = base64.urlsafe_b64encode(salt_bytes).decode("ascii").rstrip("=")
+    hash_text = base64.urlsafe_b64encode(derived).decode("ascii").rstrip("=")
+    return f"pbkdf2_sha256${PASSWORD_HASH_ITERATIONS}${salt_text}${hash_text}"
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
-    return hmac.compare_digest(hash_password(password), str(stored_hash).strip())
+    """Verify modern PBKDF2 hashes and legacy TIMESH SHA-256 hashes."""
+    stored = str(stored_hash or "").strip()
+    if stored.startswith("pbkdf2_sha256$"):
+        try:
+            _, iterations, salt_text, expected_text = stored.split("$", 3)
+            iterations = int(iterations)
+            if not 100_000 <= iterations <= 2_000_000:
+                return False
+            padding = lambda value: value + "=" * (-len(value) % 4)
+            salt_bytes = base64.urlsafe_b64decode(padding(salt_text))
+            expected = base64.urlsafe_b64decode(padding(expected_text))
+            actual = hashlib.pbkdf2_hmac(
+                "sha256", str(password).encode("utf-8"), salt_bytes, iterations
+            )
+            return hmac.compare_digest(actual, expected)
+        except (ValueError, TypeError):
+            return False
+    legacy = hashlib.sha256(f"timesh_secure_salt_2026:{password}".encode("utf-8")).hexdigest()
+    return hmac.compare_digest(legacy, stored)
 
 
 DEFAULT_USERS = {
     "admin": {
         "name": "System Admin",
         "role": "admin",
-        "password_hash": hash_password("admin@123"),
+        "password_hash": hash_password("admin@123", salt="timesh_default_admin_salt_2026"),
         "created_at": "2026-01-01 00:00:00",
     },
     "staff": {
         "name": "Staff User",
         "role": "user",
-        "password_hash": hash_password("timesh@123"),
+        "password_hash": hash_password("timesh@123", salt="timesh_default_staff_salt_2026"),
         "created_at": "2026-01-01 00:00:00",
     },
 }
@@ -316,7 +346,6 @@ button[data-baseweb="tab"][aria-selected="true"] {
     font-weight: 500;
 }
 
-/* Roster Green Found & Red Not Found buttons */
 div[class*="st-key-roster_found_"] button {
     background: linear-gradient(135deg, #15803d, #22c55e) !important;
     color: #ffffff !important;
@@ -490,6 +519,31 @@ def render_banner(title, subtitle):
 
 @st.cache_resource
 def get_gspread_client():
+    # 1) Cloud: Use TOKEN_JSON + CREDENTIALS_JSON from st.secrets
+    if "TOKEN_JSON" in st.secrets:
+        raw_token = st.secrets["TOKEN_JSON"]
+        token_info = json.loads(raw_token) if isinstance(raw_token, str) else dict(raw_token)
+
+        if "CREDENTIALS_JSON" in st.secrets:
+            raw_cred = st.secrets["CREDENTIALS_JSON"]
+            cred_info = json.loads(raw_cred) if isinstance(raw_cred, str) else dict(raw_cred)
+            installed = cred_info.get("installed") or cred_info.get("web") or {}
+            token_info.setdefault("client_id", installed.get("client_id", ""))
+            token_info.setdefault("client_secret", installed.get("client_secret", ""))
+            token_info.setdefault("token_uri", installed.get("token_uri", "https://oauth2.googleapis.com/token"))
+
+        creds = Credentials.from_authorized_user_info(token_info, SCOPES)
+        if not creds.valid and creds.refresh_token:
+            creds.refresh(Request())
+        return gspread.authorize(creds)
+
+    # 2) Cloud fallback: Service Account if configured
+    if "gcp_service_account" in st.secrets:
+        sa_info = dict(st.secrets["gcp_service_account"])
+        creds = ServiceAccountCredentials.from_service_account_info(sa_info, scopes=SCOPES)
+        return gspread.authorize(creds)
+
+    # 3) Local fallback: token.json & credentials.json
     creds = None
     if os.path.exists(TOKEN_FILE):
         creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
@@ -497,6 +551,10 @@ def get_gspread_client():
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
+            if not os.path.exists(CREDENTIALS_FILE):
+                raise FileNotFoundError(
+                    "No 'credentials.json' found and no 'TOKEN_JSON' found in Streamlit Secrets."
+                )
             flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
             creds = flow.run_local_server(port=0)
         with open(TOKEN_FILE, "w", encoding="utf-8") as token:
@@ -671,15 +729,20 @@ def get_all_tab_names(sheet_name):
 
 
 def parse_sheet_date(raw_val):
-    s = str(raw_val).strip()
+    s = str(raw_val or "").strip()
     if not s:
         return None
-    date_part = s.split(" ")[0].strip()
-    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d", "%d.%m.%Y", "%d-%b-%Y", "%d %b %Y", "%d %B %Y"):
-        try:
-            return datetime.strptime(date_part, fmt).date()
-        except ValueError:
-            continue
+    formats = (
+        "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d",
+        "%d.%m.%Y", "%d-%b-%Y", "%d %b %Y", "%d %B %Y",
+        "%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M:%S",
+    )
+    for candidate in (s, s.split(" ")[0]):
+        for fmt in formats:
+            try:
+                return datetime.strptime(candidate, fmt).date()
+            except ValueError:
+                continue
     return None
 
 
@@ -905,31 +968,46 @@ def roster_sl_sort_key(row_dict: dict):
     return (2, 0, "", row_dict.get("_sheet_row", 0))
 
 
-def compute_roster_present_bonus(roster_rows, emp_code: str, emp_name: str, as_of_date: date) -> int:
-    if not roster_rows:
+def compute_roster_present_bonus(roster_rows, roster_headers, emp_code: str, emp_name: str, as_of_date: date) -> int:
+    if not roster_rows or not roster_headers:
         return 0
+
     norm_code = str(emp_code or "").strip().lower()
     norm_name = re.sub(r"\s+", " ", str(emp_name or "").strip()).lower()
     cap_dt = min(as_of_date, YEAR_END_CAP)
-    bonus = 0
+    bonus_dates = set()
+    present_values = {"found", "yes", "present", "ok", "true", "1"}
+
     for rr in roster_rows:
         r_code = resolve_field_value(rr, "EMP_Code").lower()
-        r_name = re.sub(r"\s+", " ", (resolve_field_value(rr, "EMP_Name") or resolve_field_value(rr, "Emp_Name")).lower())
-        matched = (norm_code and r_code and r_code == norm_code) or ((not norm_code or not r_code) and norm_name and r_name == norm_name)
-        if not matched or get_roster_found_status(rr) == "Not Found":
+        r_name = re.sub(
+            r"\s+", " ",
+            (resolve_field_value(rr, "EMP_Name") or resolve_field_value(rr, "Emp_Name")).lower(),
+        )
+        matched = (
+            (bool(norm_code) and bool(r_code) and r_code == norm_code)
+            or ((not norm_code or not r_code) and bool(norm_name) and r_name == norm_name)
+        )
+        if not matched:
             continue
-        raw_status = (resolve_field_value(rr, "Attendance_Status") or resolve_field_value(rr, "Status") or resolve_field_value(rr, "Present")).strip().lower()
-        if raw_status in {"absent", "a", "leave", "l", "no", "off", "holiday", "not found"}:
-            continue
-        r_date = parse_sheet_date(resolve_field_value(rr, "Date")) or parse_sheet_date(resolve_field_value(rr, "Roster_Date")) or parse_sheet_date(resolve_field_value(rr, "From"))
-        if r_date and PROJECTION_START <= r_date <= cap_dt and (r_date.weekday() == 6 or r_date in NATIONAL_HOLIDAYS_2026):
-            bonus += 1
-    return bonus
+
+        for header in roster_headers:
+            roster_date = parse_sheet_date(header)
+            if not roster_date or not (PROJECTION_START <= roster_date <= cap_dt):
+                continue
+            if roster_date.weekday() != 6 and roster_date not in NATIONAL_HOLIDAYS_2026:
+                continue
+            status = resolve_field_value(rr, header).strip().lower()
+            if status in present_values:
+                bonus_dates.add(roster_date)
+
+    return len(bonus_dates)
 
 
 def compute_faculty_working_and_present(
     emp_code: str, emp_name: str, sheet8_rows: list, leave_rows: list, dnp_rows: list,
     roster_rows: list = None, as_of_date: date = None, holidays: set = None,
+    roster_headers: list = None,
 ) -> dict:
     if as_of_date is None:
         as_of_date = date.today()
@@ -982,19 +1060,20 @@ def compute_faculty_working_and_present(
     effective_end = min(as_of_date, YEAR_END_CAP)
     added_working_days = 0
     excluded_leave_dnp_days = 0
-    skipped_sundays_holidays = 0
 
     curr_dt = PROJECTION_START
     while curr_dt <= effective_end:
         if curr_dt.weekday() == 6 or curr_dt in holidays:
-            skipped_sundays_holidays += 1
+            pass
         elif any(is_date_in_range(curr_dt, lf, lu) for lf, lu in fac_leave_intervals) or any(is_date_in_range(curr_dt, df, du) for df, du in fac_dnp_intervals):
             excluded_leave_dnp_days += 1
         else:
             added_working_days += 1
         curr_dt += timedelta(days=1)
 
-    roster_present_bonus = compute_roster_present_bonus(roster_rows or [], emp_code, emp_name, effective_end)
+    roster_present_bonus = compute_roster_present_bonus(
+        roster_rows or [], roster_headers or [], emp_code, emp_name, effective_end
+    )
 
     return {
         "Found in Sheet8": "Yes" if found_in_sheet8 else "No (0 Base)",
@@ -1297,11 +1376,6 @@ def build_leave_suggestions(leave_rows, today_date):
     return suggestions
 
 
-def build_auth_token(username: str, password_hash: str) -> str:
-    msg = f"{username.strip().lower()}:{password_hash.strip()}"
-    return hmac.new(b"timesh_session_key_2026", msg.encode("utf-8"), hashlib.sha256).hexdigest()
-
-
 # ================= ENSURE SYSTEM SHEETS & LOAD USERS =================
 try:
     ensure_system_tabs(SPREADSHEET_NAME)
@@ -1320,25 +1394,13 @@ if "auto_refresh_enabled" not in st.session_state:
 if "roster_status_overrides" not in st.session_state:
     st.session_state["roster_status_overrides"] = {}
 
-qp_auth_u = str(st.query_params.get("auth_u", "")).strip().lower()
-qp_auth_t = str(st.query_params.get("auth_t", "")).strip()
-
-if st.session_state["logged_in_user"] is None and qp_auth_u and qp_auth_t:
-    u_match = sheet_users_db.get(qp_auth_u)
-    if u_match and hmac.compare_digest(qp_auth_t, build_auth_token(qp_auth_u, u_match["password_hash"])):
-        st.session_state["logged_in_user"] = {
-            "username": qp_auth_u,
-            "name": u_match["name"],
-            "role": u_match["role"],
-        }
-
 # ================= MINIMAL LOGIN SCREEN =================
 if st.session_state["logged_in_user"] is None:
     inject_auto_refresh(AUTO_REFRESH_SECONDS, enabled=st.session_state["auto_refresh_enabled"])
     st.markdown(
         "<div class='login-minimal-brand'>"
         "<div class='login-minimal-title'>TIMESH</div>"
-        "<div class='login-minimal-sub'>facuty mangment</div>"
+        "<div class='login-minimal-sub'>Faculty Management</div>"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -1352,14 +1414,14 @@ if st.session_state["logged_in_user"] is None:
         if submitted:
             u_rec = sheet_users_db.get(login_username)
             if u_rec and verify_password(login_password, u_rec["password_hash"]):
+                if not str(u_rec["password_hash"]).startswith("pbkdf2_sha256$"):
+                    update_user_password_in_sheet(SPREADSHEET_NAME, login_username, login_password)
                 logged_user_obj = {
                     "username": login_username,
                     "name": u_rec["name"],
                     "role": u_rec["role"],
                 }
                 st.session_state["logged_in_user"] = logged_user_obj
-                st.query_params["auth_u"] = login_username
-                st.query_params["auth_t"] = build_auth_token(login_username, u_rec["password_hash"])
                 write_activity_log(
                     SPREADSHEET_NAME,
                     logged_user_obj,
@@ -1489,8 +1551,6 @@ with st.sidebar:
             details=f"User '{current_user.get('username', '')}' logged out.",
         )
         st.session_state["logged_in_user"] = None
-        st.query_params.pop("auth_u", None)
-        st.query_params.pop("auth_t", None)
         st.rerun()
 
 inject_auto_refresh(AUTO_REFRESH_SECONDS, enabled=st.session_state["auto_refresh_enabled"])
@@ -1536,7 +1596,8 @@ if slice_choice == "Analytics Dashboard":
         hdr_c1, hdr_c2 = st.columns([4, 1])
         hdr_c1.subheader(f"Filtered Records — {valid_pie_fields[qp_field]}: {qp_val} ({len(drill_rows)})")
         if hdr_c2.button("Clear Selection", use_container_width=True):
-            st.query_params.clear()
+            st.query_params.pop("pie_field", None)
+            st.query_params.pop("pie_val", None)
             st.rerun()
         render_html_table(drill_rows, max_rows=500)
 
@@ -1684,7 +1745,7 @@ elif slice_choice == "FACULTY_CORNER":
                 _, sheet3_leave_rows = load_worksheet_rows_with_index(SPREADSHEET_NAME, leave_tab) if leave_tab else ([], [])
                 _, dnp_lookup_rows = load_worksheet_rows_with_index(SPREADSHEET_NAME, target_dnp_lookup_tab) if target_dnp_lookup_tab in all_tabs else ([], [])
                 _, sheet8_attendance_rows = load_worksheet_rows_with_index(SPREADSHEET_NAME, attendance_base_tab) if attendance_base_tab else ([], [])
-                _, roster_lookup_rows = load_worksheet_rows_with_index(SPREADSHEET_NAME, roster_tab) if roster_tab else ([], [])
+                roster_headers, roster_lookup_rows = load_worksheet_rows_with_index(SPREADSHEET_NAME, roster_tab) if roster_tab else ([], [])
 
                 st.markdown("<div class='profile-spotlight-box'>", unsafe_allow_html=True)
                 top_p1, top_p2 = st.columns([4.5, 1])
@@ -1712,7 +1773,8 @@ elif slice_choice == "FACULTY_CORNER":
                     render_html_table([{k: v for k, v in selected_fac_row.items() if k != "_sheet_row"}], max_rows=1)
 
                 att_summary = compute_faculty_working_and_present(
-                    sel_code, sel_name, sheet8_attendance_rows, sheet3_leave_rows, dnp_lookup_rows, roster_lookup_rows, date.today(), NATIONAL_HOLIDAYS_2026
+                    sel_code, sel_name, sheet8_attendance_rows, sheet3_leave_rows, dnp_lookup_rows,
+                    roster_lookup_rows, date.today(), NATIONAL_HOLIDAYS_2026, roster_headers=roster_headers
                 )
                 st.write("")
                 st.markdown(f"<div style='font-weight:700;color:#2dd4bf;font-size:14.5px;margin-bottom:8px;'>📊 Working Days & Total Days Present ({html.escape(target_base_tab)} + Day-by-Day till 31/12/2026)</div>", unsafe_allow_html=True)
@@ -2243,22 +2305,25 @@ elif slice_choice == "Leave":
             frozen_leave_cols = {"", "EMP_Code", "Emp_Name", "EMP_Name", "Emp_Designation", "Emp_Department", "SL"}
             eb1, eb2 = st.columns([1.2, 4])
             if eb1.button("Update Leave", type="primary", key=f"ed_lv_save_{editing_row_num}", use_container_width=True):
-                updated_rec = {}
-                for h in leave_headers:
-                    hc = h.strip()
-                    if not hc: continue
-                    if hc in frozen_leave_cols: updated_rec[h] = str(row_to_edit.get(h, ""))
-                    elif hc == "From": updated_rec[h] = ed_from_val.strftime("%Y-%m-%d")
-                    elif hc == "Upto": updated_rec[h] = ed_upto_val.strftime("%Y-%m-%d")
-                    elif hc == "Leave_types": updated_rec[h] = str(ed_ltype_val or "").strip()
-                    elif hc in {"Applying_Stutas.", "Applying_Status"}: updated_rec[h] = str(ed_astatus_val or "").strip()
-                    elif hc == "Take_Action_By": updated_rec[h] = str(ed_action_val or "").strip()
-                    else: updated_rec[h] = str(row_to_edit.get(h, ""))
-                update_sheet_row(SPREADSHEET_NAME, leave_tab, leave_headers, editing_row_num, updated_rec)
-                write_activity_log(SPREADSHEET_NAME, current_user, "Edit Leave", "Leave", f"Updated row {editing_row_num} for {edit_name}")
-                st.session_state["editing_leave_sheet_row"] = None
-                st.success("Leave updated!")
-                st.rerun()
+                if ed_upto_val < ed_from_val:
+                    st.error("Upto date cannot be earlier than From date.")
+                else:
+                    updated_rec = {}
+                    for h in leave_headers:
+                        hc = h.strip()
+                        if not hc: continue
+                        if hc in frozen_leave_cols: updated_rec[h] = str(row_to_edit.get(h, ""))
+                        elif hc == "From": updated_rec[h] = ed_from_val.strftime("%Y-%m-%d")
+                        elif hc == "Upto": updated_rec[h] = ed_upto_val.strftime("%Y-%m-%d")
+                        elif hc == "Leave_types": updated_rec[h] = str(ed_ltype_val or "").strip()
+                        elif hc in {"Applying_Stutas.", "Applying_Status"}: updated_rec[h] = str(ed_astatus_val or "").strip()
+                        elif hc == "Take_Action_By": updated_rec[h] = str(ed_action_val or "").strip()
+                        else: updated_rec[h] = str(row_to_edit.get(h, ""))
+                    update_sheet_row(SPREADSHEET_NAME, leave_tab, leave_headers, editing_row_num, updated_rec)
+                    write_activity_log(SPREADSHEET_NAME, current_user, "Edit Leave", "Leave", f"Updated row {editing_row_num} for {edit_name}")
+                    st.session_state["editing_leave_sheet_row"] = None
+                    st.success("Leave updated!")
+                    st.rerun()
             if eb2.button("Cancel Edit", key=f"ed_lv_cancel_{editing_row_num}"):
                 st.session_state["editing_leave_sheet_row"] = None
                 st.rerun()
@@ -2342,25 +2407,28 @@ elif slice_choice == "Leave":
                 new_lv_status = add_e2.selectbox("Applying_Stutas.", APPLYING_STATUS_OPTIONS, index=None, key="add_lv_status_sel")
                 new_lv_action = add_e3.selectbox("Take_Action_By", TAKE_ACTION_BY_OPTIONS, index=None, key="add_lv_action_sel")
                 if st.form_submit_button("Save Leave", type="primary"):
-                    payload = {h: "" for h in leave_headers if h.strip()}
-                    for h in leave_headers:
-                        hc = h.strip()
-                        if not hc: continue
-                        nh = re.sub(r"[^a-z0-9]", "", hc.lower())
-                        if nh == "empcode": payload[h] = f_emp_code
-                        elif nh == "empname": payload[h] = f_emp_name
-                        elif nh == "empdesignation": payload[h] = f_desig
-                        elif nh == "empdepartment": payload[h] = f_dept
-                        elif nh == "sl": payload[h] = f_sl
-                        elif nh == "from": payload[h] = new_lv_from.strftime("%Y-%m-%d")
-                        elif nh == "upto": payload[h] = new_lv_upto.strftime("%Y-%m-%d")
-                        elif nh == "leavetypes": payload[h] = str(new_lv_type or "").strip()
-                        elif nh in {"applyingstutas", "applyingstatus"}: payload[h] = str(new_lv_status or "").strip()
-                        elif nh == "takeactionby": payload[h] = str(new_lv_action or "").strip()
-                    append_sheet_row(SPREADSHEET_NAME, leave_tab, leave_headers, payload)
-                    write_activity_log(SPREADSHEET_NAME, current_user, "Add Leave", "Leave", f"Added leave for {f_emp_name} ({f_emp_code})")
-                    st.success(f"Leave saved to '{leave_tab}'!")
-                    st.rerun()
+                    if new_lv_upto < new_lv_from:
+                        st.error("Upto date cannot be earlier than From date.")
+                    else:
+                        payload = {h: "" for h in leave_headers if h.strip()}
+                        for h in leave_headers:
+                            hc = h.strip()
+                            if not hc: continue
+                            nh = re.sub(r"[^a-z0-9]", "", hc.lower())
+                            if nh == "empcode": payload[h] = f_emp_code
+                            elif nh == "empname": payload[h] = f_emp_name
+                            elif nh == "empdesignation": payload[h] = f_desig
+                            elif nh == "empdepartment": payload[h] = f_dept
+                            elif nh == "sl": payload[h] = f_sl
+                            elif nh == "from": payload[h] = new_lv_from.strftime("%Y-%m-%d")
+                            elif nh == "upto": payload[h] = new_lv_upto.strftime("%Y-%m-%d")
+                            elif nh == "leavetypes": payload[h] = str(new_lv_type or "").strip()
+                            elif nh in {"applyingstutas", "applyingstatus"}: payload[h] = str(new_lv_status or "").strip()
+                            elif nh == "takeactionby": payload[h] = str(new_lv_action or "").strip()
+                        append_sheet_row(SPREADSHEET_NAME, leave_tab, leave_headers, payload)
+                        write_activity_log(SPREADSHEET_NAME, current_user, "Add Leave", "Leave", f"Added leave for {f_emp_name} ({f_emp_code})")
+                        st.success(f"Leave saved to '{leave_tab}'!")
+                        st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -2420,22 +2488,25 @@ elif slice_choice == "Do Not Punch":
             dnp_issue_by = nf2.text_input("Notification issue By", value=current_user.get("name", ""), key="dnp_issue_by_input").strip()
 
             if st.button("Save Do Not Punch", type="primary", key="dnp_save_btn"):
-                field_map = {
-                    "empcode": fac_emp_code, "empname": fac_emp_name, "empdesignation": fac_desig,
-                    "empdepartment": fac_dept, "sl": fac_sl, "status": fac_status, "category": fac_category,
-                    "donotpunchfrom": dnp_from_date.strftime("%Y-%m-%d"),
-                    "donotpunchupto": dnp_upto_date.strftime("%Y-%m-%d"),
-                    "notificationdate": dnp_notif_date.strftime("%Y-%m-%d"),
-                    "notificationissueby": dnp_issue_by,
-                }
-                new_dnp_row = {
-                    h: field_map.get(re.sub(r"[^a-z0-9]", "", h.strip().lower()), "")
-                    for h in dnp_headers if h.strip()
-                }
-                append_sheet_row(SPREADSHEET_NAME, target_dnp_tab, dnp_headers, new_dnp_row)
-                write_activity_log(SPREADSHEET_NAME, current_user, "Add Do Not Punch", "Do Not Punch", f"Added DNP for {fac_emp_name} ({fac_emp_code})")
-                st.success(f"Saved to '{target_dnp_tab}'!")
-                st.rerun()
+                if dnp_upto_date < dnp_from_date:
+                    st.error("Do Not Punch Upto date cannot be earlier than From date.")
+                else:
+                    field_map = {
+                        "empcode": fac_emp_code, "empname": fac_emp_name, "empdesignation": fac_desig,
+                        "empdepartment": fac_dept, "sl": fac_sl, "status": fac_status, "category": fac_category,
+                        "donotpunchfrom": dnp_from_date.strftime("%Y-%m-%d"),
+                        "donotpunchupto": dnp_upto_date.strftime("%Y-%m-%d"),
+                        "notificationdate": dnp_notif_date.strftime("%Y-%m-%d"),
+                        "notificationissueby": dnp_issue_by,
+                    }
+                    new_dnp_row = {
+                        h: field_map.get(re.sub(r"[^a-z0-9]", "", h.strip().lower()), "")
+                        for h in dnp_headers if h.strip()
+                    }
+                    append_sheet_row(SPREADSHEET_NAME, target_dnp_tab, dnp_headers, new_dnp_row)
+                    write_activity_log(SPREADSHEET_NAME, current_user, "Add Do Not Punch", "Do Not Punch", f"Added DNP for {fac_emp_name} ({fac_emp_code})")
+                    st.success(f"Saved to '{target_dnp_tab}'!")
+                    st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
     with tab_dnp_records:
@@ -2507,7 +2578,13 @@ elif slice_choice == "Users":
                 new_role = u3.selectbox("Role", ["user", "admin"])
                 new_pass = st.text_input("Initial Password", type="password", placeholder="Set password")
                 if st.form_submit_button("Create User", type="primary"):
-                    if new_uname and new_pass and new_uname not in sheet_users_db:
+                    if not new_uname or not re.fullmatch(r"[a-z0-9_.-]{3,40}", new_uname):
+                        st.error("Username must be 3–40 characters: letters, numbers, dot, underscore or hyphen.")
+                    elif len(new_pass) < 8:
+                        st.error("Initial password must be at least 8 characters long.")
+                    elif new_uname in sheet_users_db:
+                        st.error("This username already exists.")
+                    else:
                         add_user_to_sheet(SPREADSHEET_NAME, new_uname, new_fullname, new_role, new_pass)
                         write_activity_log(SPREADSHEET_NAME, current_user, "Create User", "Users & Security", f"Created user '{new_uname}'")
                         st.success(f"User '{new_uname}' created!")
@@ -2521,14 +2598,14 @@ elif slice_choice == "Users":
             if st.form_submit_button("Update Password", type="primary"):
                 uname = current_user["username"]
                 rec = sheet_users_db.get(uname)
-                if rec and verify_password(curr_pw, rec["password_hash"]) and next_pw:
-                    if update_user_password_in_sheet(SPREADSHEET_NAME, uname, next_pw):
-                        st.query_params["auth_t"] = build_auth_token(uname, hash_password(next_pw))
-                        write_activity_log(SPREADSHEET_NAME, current_user, "Change Password", "Users & Security", f"Updated password for '{uname}'")
-                        st.success("Password updated!")
-                        st.rerun()
-                else:
-                    st.error("Current password is incorrect or new password is empty.")
+                if not rec or not verify_password(curr_pw, rec["password_hash"]):
+                    st.error("Current password is incorrect.")
+                elif len(next_pw) < 8:
+                    st.error("New password must be at least 8 characters long.")
+                elif update_user_password_in_sheet(SPREADSHEET_NAME, uname, next_pw):
+                    write_activity_log(SPREADSHEET_NAME, current_user, "Change Password", "Users & Security", f"Updated password for '{uname}'")
+                    st.success("Password updated!")
+                    st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
     if is_admin_user and tab_admin_notices is not None:
